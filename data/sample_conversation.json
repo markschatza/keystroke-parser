@@ -1,0 +1,212 @@
+[
+  {
+    "timestamp": "2026-04-18T07:48:00",
+    "participant": "Brotisserie",
+    "window_title": "Discord - Fable Foundry #core",
+    "app_name": "Discord",
+    "chars": "New app idea. Always on voice recorder and keystroke recorder with active app so you can rebuild your day hour to hour like you said so you can see if you spent 4 hours on a bug."
+  },
+  {
+    "timestamp": "2026-04-18T07:52:00",
+    "participant": "Aesop",
+    "window_title": "Claude Code",
+    "app_name": "Terminal",
+    "chars": "Keystroke recording: ~200 chars/min fast typist, 8hr day = ~96K chars, ~144K keystrokes, per-event log ~100 bytes = ~14MB/day. Negligible. Voice recording is the expensive part."
+  },
+  {
+    "timestamp": "2026-04-18T08:05:00",
+    "participant": "Brotisserie",
+    "window_title": "Discord - Fable Foundry #core",
+    "app_name": "Discord",
+    "chars": "Also assuming people are using their own things with Wispr flow or other speech to text apps we actually only need to track the pasted output as keystrokes? Is that possible?"
+  },
+  {
+    "timestamp": "2026-04-18T08:10:00",
+    "participant": "Aesop",
+    "window_title": "Claude Code",
+    "app_name": "Terminal",
+    "chars": "Voice-typed text has distinct fingerprint: variable timing vs robotic uniform timing, irregular bursts vs smooth flow. With enough timing data could label segments as likely voice vs manual. Radical implication: might not need microphone at all."
+  },
+  {
+    "timestamp": "2026-04-18T08:30:00",
+    "participant": "Brotisserie",
+    "window_title": "Discord - Fable Foundry #core",
+    "app_name": "Discord",
+    "chars": "Ok let's do this. Next is privacy. Thinking local hosted with own api keys offered for free. Or cloud synced and use of automatic model for monthly subscription. What do I need to worry about for hosting this?"
+  },
+  {
+    "timestamp": "2026-04-18T09:00:00",
+    "participant": "Aesop",
+    "window_title": "Claude Code",
+    "app_name": "Terminal",
+    "chars": "The real hard security problems: malware on machine (already owns keystrokes), law enforcement subpoenas (can't protect against), building the service securely. Encryption at rest is real engineering challenge. Key management for BYOK is hard."
+  },
+  {
+    "timestamp": "2026-04-18T09:15:00",
+    "participant": "Brotisserie",
+    "window_title": "Discord - Fable Foundry #core",
+    "app_name": "Discord",
+    "chars": "I would want to build this as profitable though. What are choices there? Local is a no brainer for dev but want to make sure it's viable before spending real effort on it."
+  },
+  {
+    "timestamp": "2026-04-18T09:20:00",
+    "participant": "Aesop",
+    "window_title": "Claude Code",
+    "app_name": "Terminal",
+    "chars": "Option 1 Notion model: free local BYOK, Pro $10-15/mo cloud sync + hosted AI. Option 2 hosted AI inference markup. Option 3 one-time purchase. Option 4 B2B teams $8/user/mo. B2B teams is most realistic indie path."
+  },
+  {
+    "timestamp": "2026-04-18T09:35:00",
+    "participant": "Brotisserie",
+    "window_title": "Discord - Fable Foundry #core",
+    "app_name": "Discord",
+    "chars": "The notion model for sure. And remember MVP is only taking keystrokes and building a daily summary. And then this daily summary is queryable in the future to get how did I fix this bug sort of thing."
+  },
+  {
+    "timestamp": "2026-04-18T09:45:00",
+    "participant": "Aesop",
+    "window_title": "Claude Code",
+    "app_name": "Terminal",
+    "chars": "8 hours of keystrokes cannot fit in LLM context. Need event compression: raw keystrokes -> sessions -> session summaries -> daily summary. Sessionization and compression is where intelligence lives. Sketched architecture: logger -> SQLite -> LLM pipeline -> query interface."
+  },
+  {
+    "timestamp": "2026-04-18T10:00:00",
+    "participant": "Brotisserie",
+    "window_title": "Discord - Fable Foundry #core",
+    "app_name": "Discord",
+    "chars": "So hmm the other problem is nowadays we solve by asking an LLM. feel like we will want to capture context around user input too."
+  },
+  {
+    "timestamp": "2026-04-18T10:05:00",
+    "participant": "Aesop",
+    "window_title": "Claude Code",
+    "app_name": "Terminal",
+    "chars": "Shift: LLM reads content and labels work instead of inferring from window titles. Two levels: context extraction (Phi-3-mini local) every 30-60s, daily summary (large model) once per day. Storage gets richer with context_labels table."
+  },
+  {
+    "timestamp": "2026-04-18T10:15:00",
+    "participant": "Brotisserie",
+    "window_title": "Discord - Fable Foundry #core",
+    "app_name": "Discord",
+    "chars": "The context is easy. We would feed hour by hour with some overlap."
+  },
+  {
+    "timestamp": "2026-04-18T10:20:00",
+    "participant": "Aesop",
+    "window_title": "Claude Code",
+    "app_name": "Terminal",
+    "chars": "Revised architecture: logger writes continuously to SQLite, end of day LLM pipeline processes hour-by-hour with 15min overlap, query interface. Simpler, same output, no real-time inference."
+  },
+  {
+    "timestamp": "2026-04-18T10:30:00",
+    "participant": "Brotisserie",
+    "window_title": "Discord - Fable Foundry #core",
+    "app_name": "Discord",
+    "chars": "Can you write this plan as a markdown and upload here and save somewhere."
+  },
+  {
+    "timestamp": "2026-04-18T10:35:00",
+    "participant": "Aesop",
+    "window_title": "VS Code",
+    "app_name": "VS Code",
+    "chars": "Writing keystroke-lifecycle-tracker.md to /mnt/c/Users/marks/Documents/"
+  },
+  {
+    "timestamp": "2026-04-18T11:00:00",
+    "participant": "Brotisserie",
+    "window_title": "Discord - Fable Foundry #core",
+    "app_name": "Discord",
+    "chars": "Let's save a v0.1 implementation plan and then let you go off and build it. I want to build all 3 components but have them be separate from each other. 1. Keystrokes CLI app that prints to terminal flushes every 1 minute. 2. Database with 10 days of random dev work. 3. Dummy frontend with no connections. Any questions? If not get building!"
+  },
+  {
+    "timestamp": "2026-04-18T11:05:00",
+    "participant": "Aesop",
+    "window_title": "Claude Code",
+    "app_name": "Terminal",
+    "chars": "Creating v0.1-implementation-plan.md, 3 IMPLEMENTATION.md files, spawning 3 subagents in parallel to build keystroke-logger, db-query-layer, frontend."
+  },
+  {
+    "timestamp": "2026-04-18T11:45:00",
+    "participant": "Aesop",
+    "window_title": "Claude Code",
+    "app_name": "Terminal",
+    "chars": "All 3 components built. keystroke-logger (logger.py + requirements), db-query-layer (10 days data + query.py + llm_client), frontend (pystray + tkinter system tray app)."
+  },
+  {
+    "timestamp": "2026-04-18T12:00:00",
+    "participant": "Brotisserie",
+    "window_title": "Discord - Fable Foundry #core",
+    "app_name": "Discord",
+    "chars": "Let's get all 3 version controlled. Don't need to point upstream anywhere yet. Just local control."
+  },
+  {
+    "timestamp": "2026-04-18T12:30:00",
+    "participant": "Aesop",
+    "window_title": "Claude Code",
+    "app_name": "Terminal",
+    "chars": "Git init for all 3 repos. Cleaned pycache. Renamed master to main. All 3 repos on main branch, clean working trees."
+  },
+  {
+    "timestamp": "2026-04-18T12:45:00",
+    "participant": "Brotisserie",
+    "window_title": "Discord - Fable Foundry #core",
+    "app_name": "Discord",
+    "chars": "Let's test the query one a bit as it's the only one we can test from here. Can you compact some context so we can focus on that?"
+  },
+  {
+    "timestamp": "2026-04-18T12:50:00",
+    "participant": "Aesop",
+    "window_title": "Claude Code",
+    "app_name": "Terminal",
+    "chars": "DB has 70 sessions April 6-17, app mix VS Code (42) Terminal (11) Slack (10) Mail (7), work types writing (22) communicating (15) debugging (15) reading (14) planning (4). Verified SQL queries work correctly."
+  },
+  {
+    "timestamp": "2026-04-18T13:00:00",
+    "participant": "Brotisserie",
+    "window_title": "Discord - Fable Foundry #core",
+    "app_name": "Discord",
+    "chars": "Can you grab api key from Hermes agent env? Look in the .Hermes folder should be in there somewhere."
+  },
+  {
+    "timestamp": "2026-04-18T13:10:00",
+    "participant": "Aesop",
+    "window_title": "Claude Code",
+    "app_name": "Terminal",
+    "chars": "Found key in ~/.hermes/.env. Key format sk-cp-... Error 401 initially. Tried multiple endpoints. Found correct endpoint: https://api.minimax.io/v1/text/chatcompletion_v2. Model MiniMax-M2.7 works."
+  },
+  {
+    "timestamp": "2026-04-18T13:30:00",
+    "participant": "Aesop",
+    "window_title": "Claude Code",
+    "app_name": "Terminal",
+    "chars": "Test query postgres debug: LLM generates SQL, finds 2 sessions on Apr 7, synthesizes full narrative. Query 2 frontend vs backend: categorizes all 75 sessions, returns breakdown with hours and percentages."
+  },
+  {
+    "timestamp": "2026-04-18T13:45:00",
+    "participant": "Brotisserie",
+    "window_title": "Discord - Fable Foundry #core",
+    "app_name": "Discord",
+    "chars": "Can you show me some examples of what's actually in the database right now?"
+  },
+  {
+    "timestamp": "2026-04-18T13:50:00",
+    "participant": "Aesop",
+    "window_title": "Claude Code",
+    "app_name": "Terminal",
+    "chars": "Displayed 10 day overview table, April 16 full session breakdown (7 sessions 4h5m), April 7 postgres debugging day (7 sessions 3h15m), and sample of 20 unique topic labels."
+  },
+  {
+    "timestamp": "2026-04-18T14:00:00",
+    "participant": "Brotisserie",
+    "window_title": "Discord - Fable Foundry #core",
+    "app_name": "Discord",
+    "chars": "Ok so these are post summarized. Let's build another independent project that takes raw keystrokes in a database and parses them into time boxed summaries like you have here to make sure we can do that step."
+  },
+  {
+    "timestamp": "2026-04-18T14:05:00",
+    "participant": "Brotisserie",
+    "window_title": "Discord - Fable Foundry #core",
+    "app_name": "Discord",
+    "chars": "I'm pretty sure you as Hermes agent have access to all previous sessions or at least the recent and still active ones. Can you use those as our baseline keystroke data and try to summarize them?"
+  }
+]
