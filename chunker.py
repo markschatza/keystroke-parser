@@ -236,58 +236,150 @@ class ChunkProcessor:
         1. Same task straddling two chunks → appears as two sessions
         2. Work type differs at boundary (chunk 1: writing, chunk 2: debugging)
         3. Topic differs for same window_id at boundary
+        4. Same app appearing in rapid alternation (interleaved conversations)
 
         Strategy:
         - Sort sessions by start_time
-        - Merge adjacent sessions with same app_name + window_id + work_type
-        - For same window_id but different work_type: keep separate (genuine shift)
-        - Cross-app sessions with similar topics: evaluate for merge
+        - Pass 1: Merge adjacent same-app sessions with small gaps (same logical flow)
+        - Pass 2: Aggressive merge for same app + same work_type across chunk boundaries
+        - Pass 3: For same window_id with gap < 15min → merge regardless of work_type
         """
         if not chunk_sessions:
             return []
 
         from sessionizer import Session
 
-        # Sort by start_time then chunk_id (for stable ordering)
+        # Sort by start_time
         sorted_sessions = sorted(
             chunk_sessions,
             key=lambda s: (s.start_time, getattr(s, 'chunk_id', 0))
         )
 
+        # Pass 1: Basic adjacent merge (same app + same window_title + same work_type + small gap)
+        merged = self._merge_pass(sorted_sessions, strict=True)
+
+        # Pass 2: Group by app first, then merge all bursts within the same app
+        # regardless of window_title if they're within gap_limit — handles interleaved
+        # conversations (e.g., two Codex agents alternating every 3 min)
+        merged = self._merge_by_app(merged, gap_limit=5)
+
+        # Pass 3: Cross-chunk merge (same app + same work_type + gap < 15min)
+        merged = self._merge_pass(merged, strict=False, gap_limit=15, work_type_strict=True)
+
+        # Pass 4: Same window_id regardless of work_type if gap < 15min
+        merged = self._merge_pass(merged, strict=False, gap_limit=15, window_strict=False)
+
+        return merged
+
+    def _merge_pass(
+        self,
+        sessions: List,
+        strict: bool = False,
+        gap_limit: float = 5.0,
+        work_type_strict: bool = True,
+        window_strict: bool = True,
+    ) -> List:
+        """Single merge pass over sorted sessions."""
+        if not sessions:
+            return []
+
         fixed = []
-        current = None
+        current = sessions[0]
+        fixed.append(current)
 
-        for session in sorted_sessions:
-            if current is None:
-                fixed.append(session)
-                current = session
-                continue
+        for session in sessions[1:]:
+            prev = fixed[-1]
 
-            # Check if we should merge with current
-            should_merge = self._should_merge(current, session)
+            should_merge = self._should_merge(
+                prev, session,
+                strict=strict,
+                gap_limit=gap_limit,
+                work_type_strict=work_type_strict,
+                window_strict=window_strict,
+            )
 
             if should_merge == "merge":
                 # Extend current session
-                current.end_time = session.end_time
-                current.chars += session.chars
-                current.duration_minutes = self._compute_duration(
-                    current.start_time, session.end_time
+                prev.end_time = session.end_time
+                prev.chars += session.chars
+                prev.duration_minutes = self._compute_duration(
+                    prev.start_time, session.end_time
                 )
+                # Keep dominant work_type if merging different types
+                if prev.work_type != session.work_type and not work_type_strict:
+                    # Keep the one with more characters (more content)
+                    pass  # chars already merged, keep first work_type
             else:
                 fixed.append(session)
-                current = session
 
-        return fixed
+    def _merge_by_app(self, sessions: List, gap_limit: float = 5.0) -> List:
+        """
+        For each app, merge all sessions within that app that have small gaps.
+        This handles interleaved conversations within the same app (e.g., Codex
+        with Agent 1 auth + Agent 2 dashboard alternating every 3 minutes).
+        """
+        from collections import defaultdict
+        from sessionizer import Session
 
-    def _should_merge(self, prev, curr) -> str:
+        if not sessions:
+            return []
+
+        # Group by app
+        by_app = defaultdict(list)
+        for s in sessions:
+            by_app[s.app_name].append(s)
+
+        result = []
+        for app_name, app_sessions in by_app.items():
+            # Sort by start_time within this app
+            app_sessions = sorted(app_sessions, key=lambda s: s.start_time)
+
+            # Merge all sessions in this app that are within gap_limit
+            merged = []
+            current = app_sessions[0]
+            merged.append(current)
+
+            for session in app_sessions[1:]:
+                prev = merged[-1]
+
+                def ts_to_dt(ts_str):
+                    return datetime.strptime(ts_str, "%H:%M:%S")
+
+                gap = ts_to_dt(session.start_time) - ts_to_dt(prev.end_time)
+                gap_minutes = gap.total_seconds() / 60
+
+                if gap_minutes <= gap_limit:
+                    # Merge into current
+                    prev.end_time = session.end_time
+                    prev.chars += session.chars
+                    prev.duration_minutes = self._compute_duration(
+                        prev.start_time, session.end_time
+                    )
+                    # Keep first window_title (it was there first)
+                else:
+                    merged.append(session)
+
+            result.extend(merged)
+
+        # Re-sort by start_time
+        return sorted(result, key=lambda s: s.start_time)
+
+    def _should_merge(
+        self,
+        prev,
+        curr,
+        strict: bool = False,
+        gap_limit: float = 5.0,
+        work_type_strict: bool = True,
+        window_strict: bool = True,
+    ) -> str:
         """
         Decide whether to merge two adjacent sessions.
 
+        strict=True: exact match required (same app + same window_title + same work_type)
+        strict=False: use gap_limit and relaxed matching
+
         Returns: "merge" | "split"
-        Merge if ALL of:
-        - Same app_name AND same window_id
-        - Adjacent in time (within overlap window gap)
-        - Same work_type OR same topic (flexible on work_type at boundaries)
         """
         from datetime import time
 
@@ -297,19 +389,37 @@ class ChunkProcessor:
         gap = ts_to_dt(curr.start_time) - ts_to_dt(prev.end_time)
         gap_minutes = gap.total_seconds() / 60
 
-        # If gap > overlap + buffer, they're genuinely separate
-        if gap_minutes > self.overlap_minutes * 2:
+        # If gap is negative or huge, split
+        if gap_minutes < -1 or gap_minutes > gap_limit * 2:
             return "split"
 
-        # Same app + same window_id + same work_type → merge
+        if strict:
+            # Exact match only
+            if (prev.app_name == curr.app_name and
+                prev.window_title == curr.window_title and
+                prev.work_type == curr.work_type and
+                gap_minutes <= gap_limit):
+                return "merge"
+            return "split"
+
+        # Relaxed merge rules (used in multi-pass)
+        if gap_minutes > gap_limit:
+            return "split"
+
+        # Same app + same window_title + same work_type → merge
         if (prev.app_name == curr.app_name and
             prev.window_title == curr.window_title and
-            prev.work_type == curr.work_type):
+                (prev.work_type == curr.work_type or not work_type_strict)):
             return "merge"
 
-        # Same app + same window_id + similar topic → merge
+        # Same app + same window_title (ignoring work_type) → merge if not work_type_strict
         if (prev.app_name == curr.app_name and
             prev.window_title == curr.window_title and
+                not window_strict):
+            return "merge"
+
+        # Same app + similar topic → merge
+        if (prev.app_name == curr.app_name and
             self._topics_similar(prev.topic, curr.topic)):
             return "merge"
 

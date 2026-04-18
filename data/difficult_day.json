@@ -1,0 +1,461 @@
+[
+  {
+    "timestamp": "2026-04-18T08:00:00",
+    "window_title": "Codex - auth/middleware.py",
+    "app_name": "Codex",
+    "chars": "import jwt from 'jsonwebtoken'\nimport { Request, Response } from 'express'\n\nexport async function verifyToken(req: Request, res: Response) {",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Codex - auth/middleware.py"
+  },
+  {
+    "timestamp": "2026-04-18T08:03:00",
+    "window_title": "Codex - dashboard/Metrics.tsx",
+    "app_name": "Codex",
+    "chars": "// Metrics dashboard component\nimport React, { useState, useEffect } from 'react'\nimport { Card, Metric, Text } from '@/components/ui'",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Codex - dashboard/Metrics.tsx"
+  },
+  {
+    "timestamp": "2026-04-18T08:05:00",
+    "window_title": "Codex - auth/middleware.py",
+    "app_name": "Codex",
+    "chars": "  const token = req.headers.authorization?.split(' ')[1]\n  if (!token) {\n    return res.status(401).json({ error: 'No token provided' })",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Codex - auth/middleware.py"
+  },
+  {
+    "timestamp": "2026-04-18T08:08:00",
+    "window_title": "Codex - dashboard/Metrics.tsx",
+    "app_name": "Codex",
+    "chars": "  const [metrics, setMetrics] = useState<MetricsData[]>([])\n  const [loading, setLoading] = useState(true)",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Codex - dashboard/Metrics.tsx"
+  },
+  {
+    "timestamp": "2026-04-18T08:10:00",
+    "window_title": "Codex - auth/middleware.py",
+    "app_name": "Codex",
+    "chars": "  try {\n    const decoded = jwt.verify(token, process.env.JWT_SECRET)\n    req.user = decoded\n  } catch (err) {",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Codex - auth/middleware.py"
+  },
+  {
+    "timestamp": "2026-04-18T08:12:00",
+    "window_title": "Slack - #engineering",
+    "app_name": "Slack",
+    "chars": "hey @alice - the token refresh issue in auth middleware is fixed, can you review when you get a chance?",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Slack - #engineering"
+  },
+  {
+    "timestamp": "2026-04-18T08:13:00",
+    "window_title": "Codex - dashboard/Metrics.tsx",
+    "app_name": "Codex",
+    "chars": "  useEffect(() => {\n    fetch('/api/metrics')\n      .then(res => res.json())\n      .then(data => {\n        setMetrics(data)\n        setLoading(false)\n      })\n  }, [])",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Codex - dashboard/Metrics.tsx"
+  },
+  {
+    "timestamp": "2026-04-18T08:15:00",
+    "window_title": "Codex - auth/middleware.py",
+    "app_name": "Codex",
+    "chars": "    return res.status(403).json({ error: 'Invalid token' })\n  }\n  next()\n}",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Codex - auth/middleware.py"
+  },
+  {
+    "timestamp": "2026-04-18T08:20:00",
+    "window_title": "Chrome - JWT authentication best practices",
+    "app_name": "Chrome",
+    "chars": " researching: should JWT be stored in httpOnly cookie? StackOverflow says yes for XSS prevention. Also reading about refresh token rotation strategies.",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Chrome - JWT authentication best practices"
+  },
+  {
+    "timestamp": "2026-04-18T08:25:00",
+    "window_title": "Codex - auth/middleware.py",
+    "app_name": "Codex",
+    "chars": "// TODO: implement refresh token rotation\n// 1. Issue new access token on each request\n// 2. Rotate refresh token\n// 3. Store token family in Redis for revocation\nlet refreshTokens = new Map()",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Codex - auth/middleware.py"
+  },
+  {
+    "timestamp": "2026-04-18T08:30:00",
+    "window_title": "Outlook - Inbox",
+    "app_name": "Outlook",
+    "chars": "From: alice@company.com\nRe: auth middleware review\nLooks good! One suggestion: consider using RS256 instead of HS256 for better key rotation. Reply sent.",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Outlook - Inbox"
+  },
+  {
+    "timestamp": "2026-04-18T08:32:00",
+    "window_title": "Codex - auth/middleware.py",
+    "app_name": "Codex",
+    "chars": "// Switching to RS256 as per alice's feedback\nimport { Sign, Verify } from 'jsonwebtoken'\nconst privateKey = fs.readFileSync('./keys/private.pem')\nconst publicKey = fs.readFileSync('./keys/public.pem')",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Codex - auth/middleware.py"
+  },
+  {
+    "timestamp": "2026-04-18T08:45:00",
+    "window_title": "Codex - auth/middleware.py",
+    "app_name": "Codex",
+    "chars": "// BUG: tokens expiring too quickly\n// Access token: 15min \u2192 should be 1hr\n// Refresh token: 7 days \u2192 should be 30 days\nconst accessToken = jwt.sign(\n  { userId: user.id },\n  privateKey,\n  { algorithm: 'RS256', expiresIn: '1h' }\n)",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Codex - auth/middleware.py"
+  },
+  {
+    "timestamp": "2026-04-18T08:50:00",
+    "window_title": "Codex - dashboard/Metrics.tsx",
+    "app_name": "Codex",
+    "chars": "export function Dashboard() {\n  return (\n    <div className=\"grid grid-cols-3 gap-4 p-6\">\n      <Card><Metric label=\"Revenue\" value=\"$12,340\" /></Card>\n      <Card><Metric label=\"Users\" value=\"1,234\" /></Card>\n      <Card><Metric label=\"Churn\" value=\"2.1%\" /></Card>",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Codex - dashboard/Metrics.tsx"
+  },
+  {
+    "timestamp": "2026-04-18T08:52:00",
+    "window_title": "Codex - auth/middleware.py",
+    "app_name": "Codex",
+    "chars": "// Fixed the expiry config\nconst ACCESS_TOKEN_TTL = '1h'\nconst REFRESH_TOKEN_TTL = '30d'\n\nfunction createTokens(userId: string) {\n  const access = jwt.sign({ userId }, privateKey, { algorithm: 'RS256', expiresIn: ACCESS_TOKEN_TTL })",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Codex - auth/middleware.py"
+  },
+  {
+    "timestamp": "2026-04-18T08:55:00",
+    "window_title": "Terminal - auth API tests",
+    "app_name": "Terminal",
+    "chars": "curl -X POST http://localhost:3000/api/auth/login \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"email\":\"test@company.com\",\"password\":\"test123\"}'",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Terminal - auth API tests"
+  },
+  {
+    "timestamp": "2026-04-18T09:00:00",
+    "window_title": "Codex - auth/middleware.py",
+    "app_name": "Codex",
+    "chars": "// Testing token refresh flow:\n// 1. Login \u2192 get access + refresh tokens\n// 2. Use access token for API calls\n// 3. When expired, use refresh token to get new pair\n\nconst refreshResponse = await fetch('/api/auth/refresh', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({ refreshToken })\n})",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Codex - auth/middleware.py"
+  },
+  {
+    "timestamp": "2026-04-18T09:05:00",
+    "window_title": "Codex - dashboard/Metrics.tsx",
+    "app_name": "Codex",
+    "chars": "interface DashboardProps {\n  userId: string\n  dateRange: { start: Date; end: Date }\n  refreshInterval?: number // ms, default 30000\n}",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Codex - dashboard/Metrics.tsx"
+  },
+  {
+    "timestamp": "2026-04-18T09:08:00",
+    "window_title": "Slack - #engineering",
+    "app_name": "Slack",
+    "chars": "@alice got it, RS256 implemented. Also fixed the token expiry times. Ready for another look.",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Slack - #engineering"
+  },
+  {
+    "timestamp": "2026-04-18T09:10:00",
+    "window_title": "VS Code - types/auth.ts",
+    "app_name": "VS Code",
+    "chars": "// Type definitions for auth module\nexport interface TokenPayload {\n  userId: string\n  email: string\n  iat: number\n  exp: number\n}\n\nexport interface RefreshTokenRecord {\n  tokenHash: string\n  family: string // token family for rotation tracking\n  issuedAt: Date\n  expiresAt: Date\n  revoked: boolean\n}",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "VS Code - types/auth.ts"
+  },
+  {
+    "timestamp": "2026-04-18T09:15:00",
+    "window_title": "Codex - dashboard/Metrics.tsx",
+    "app_name": "Codex",
+    "chars": "async function fetchMetrics(dateRange: DateRange): Promise<MetricsData[]> {\n  const params = new URLSearchParams({\n    start: dateRange.start.toISOString(),\n    end: dateRange.end.toISOString()\n  })\n  const res = await fetch(`/api/metrics?${params}`)\n  if (!res.ok) throw new Error('Failed to fetch metrics')\n  return res.json()\n}",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Codex - dashboard/Metrics.tsx"
+  },
+  {
+    "timestamp": "2026-04-18T09:30:00",
+    "window_title": "Outlook - Re: Senior Engineer Interview - Chen",
+    "app_name": "Outlook",
+    "chars": "Thanks for coordinating Alice. Chen's technical screen went well - strong on distributed systems. Moving to onsite. Can you send availability for next week?",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Outlook - Re: Senior Engineer Interview - Chen"
+  },
+  {
+    "timestamp": "2026-04-18T09:32:00",
+    "window_title": "Codex - auth/middleware.py",
+    "app_name": "Codex",
+    "chars": "// Cleanup: remove unused imports\nimport { Router } from 'express'\nimport crypto from 'crypto'\n// Added: rate limiting for auth endpoints\nimport rateLimit from 'express-rate-limit'\n\nconst authRouter = Router()\nconst limiter = rateLimit({ windowMs: 15*60*1000, max: 5 })",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Codex - auth/middleware.py"
+  },
+  {
+    "timestamp": "2026-04-18T09:35:00",
+    "window_title": "Chrome - Gmail - Re: Postgres connection pooling",
+    "app_name": "Chrome",
+    "chars": "The issue is likely connection pool exhaustion. Try:\n1. pg_pool II for connection pooling\n2. Or set pool.max=20 in Prisma\n3. Also check long-running transactions holding connections",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Chrome - Gmail - Re: Postgres connection pooling"
+  },
+  {
+    "timestamp": "2026-04-18T09:38:00",
+    "window_title": "VS Code - dashboard/Layout.tsx",
+    "app_name": "VS Code",
+    "chars": "export default function Layout({ children }: { children: React.ReactNode }) {\n  return (\n    <div className=\"min-h-screen bg-gray-50\">\n      <Sidebar />\n      <main className=\"pl-64\">\n        <Header />\n        <div className=\"p-6\">{children}</div>\n      </main>\n    </div>\n  )\n}",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "VS Code - dashboard/Layout.tsx"
+  },
+  {
+    "timestamp": "2026-04-18T09:42:00",
+    "window_title": "Chrome - Gmail - Re: Postgres connection pooling",
+    "app_name": "Chrome",
+    "chars": "Thanks, increasing pool size helped. Now seeing occasional timeouts under load though. Attaching slow query log. Can we sync tomorrow?",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Chrome - Gmail - Re: Postgres connection pooling"
+  },
+  {
+    "timestamp": "2026-04-18T09:45:00",
+    "window_title": "Codex - auth/middleware.py",
+    "app_name": "Codex",
+    "chars": "// Auth middleware complete!\n// Features:\n// - RS256 JWT with 1hr access token\n// - Refresh token rotation (30 days)\n// - Rate limiting (5 attempts per 15min)\n// - Token family tracking in Redis\n\n// TODO before merge:\n// - [x] RS256 switch\n// - [x] expiry times fixed\n// - [ ] add tests\n// - [ ] document refresh flow",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Codex - auth/middleware.py"
+  },
+  {
+    "timestamp": "2026-04-18T09:50:00",
+    "window_title": "Outlook - Re: Senior Engineer Interview - Chen",
+    "app_name": "Outlook",
+    "chars": "Onsite scheduled for Thursday 2pm. Panel: Alice (backend), Bob (frontend), Carol (system design). Sending calendar invite now.",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Outlook - Re: Senior Engineer Interview - Chen"
+  },
+  {
+    "timestamp": "2026-04-18T10:00:00",
+    "window_title": "VS Code - services/userService.ts",
+    "app_name": "VS Code",
+    "chars": "// User service - new feature: user preferences\nimport { db } from '@/lib/database'\nimport { cache } from '@/lib/redis'\n\nexport interface UserPreferences {\n  theme: 'light' | 'dark'\n  notifications: boolean\n  timezone: string\n  language: string\n}",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "VS Code - services/userService.ts"
+  },
+  {
+    "timestamp": "2026-04-18T10:05:00",
+    "window_title": "Slack - #backend-team",
+    "app_name": "Slack",
+    "chars": "Sprint planning is at 2pm today. Please update your tickets before then. Reminder: velocity tracking starts this sprint.",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Slack - #backend-team"
+  },
+  {
+    "timestamp": "2026-04-18T10:08:00",
+    "window_title": "VS Code - services/userService.ts",
+    "app_name": "VS Code",
+    "chars": "export async function getUserPreferences(userId: string): Promise<UserPreferences> {\n  const cached = await cache.get(`prefs:${userId}`)\n  if (cached) return JSON.parse(cached)\n  \n  const user = await db.user.findUnique({ where: { id: userId } })\n  const prefs = user.preferences as UserPreferences\n  await cache.setex(`prefs:${userId}`, 3600, JSON.stringify(prefs))\n  return prefs\n}",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "VS Code - services/userService.ts"
+  },
+  {
+    "timestamp": "2026-04-18T10:12:00",
+    "window_title": "Codex - dashboard/Chart.tsx",
+    "app_name": "Codex",
+    "chars": "// Line chart for metrics over time\nimport { Line } from 'react-chartjs-2'\nimport {\n  Chart as ChartJS,\n  CategoryScale, LinearScale, PointElement, LineElement,\n  Title, Tooltip, Legend, Filler\n} from 'chart.js'\n\nChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler)",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Codex - dashboard/Chart.tsx"
+  },
+  {
+    "timestamp": "2026-04-18T10:15:00",
+    "window_title": "Terminal - Redis debug",
+    "app_name": "Terminal",
+    "chars": "redis-cli> KEYS prefs:*\n1) prefs:user_123\n2) prefs:user_456\nredis-cli> GET prefs:user_123\n\"{\\\"theme\\\":\\\"dark\\\",\\\"notifications\\\":true,\\\"timezone\\\":\\\"America/New_York\\\"}\"\nredis-cli> TTL prefs:user_123\n(integer) 3542",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Terminal - Redis debug"
+  },
+  {
+    "timestamp": "2026-04-18T10:25:00",
+    "window_title": "VS Code - services/orderService.ts",
+    "app_name": "VS Code",
+    "chars": "// BUG: order total incorrect when discount applied\n// Reproduced: order with 20% discount shows wrong total\nfunction calculateTotal(items: OrderItem[], discount: number): number {\n  const subtotal = items.reduce((sum, item) => sum + item.price * item.qty, 0)\n  const discountAmount = subtotal * discount\n  return subtotal - discountAmount  // BUG: should be subtotal * (1 - discount)\n}",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "VS Code - services/orderService.ts"
+  },
+  {
+    "timestamp": "2026-04-18T10:28:00",
+    "window_title": "Chrome - Stack Overflow - floating point discount",
+    "app_name": "Chrome",
+    "chars": "Floating point precision issue when calculating discounts in JavaScript:\n0.1 + 0.2 !== 0.3\nShould use: (price * 100 * qty - discount * 100) / 100\nOr use a decimal library like decimal.js",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Chrome - Stack Overflow - floating point discount"
+  },
+  {
+    "timestamp": "2026-04-18T10:30:00",
+    "window_title": "VS Code - services/orderService.ts",
+    "app_name": "VS Code",
+    "chars": "// Fixed: use integer math for precision\nfunction calculateTotal(items: OrderItem[], discount: number): number {\n  const subtotal = items.reduce((sum, item) => sum + item.price * item.qty * 100, 0)\n  const discountAmount = Math.round(subtotal * discount)\n  return (subtotal - discountAmount) / 100\n}",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "VS Code - services/orderService.ts"
+  },
+  {
+    "timestamp": "2026-04-18T10:33:00",
+    "window_title": "VS Code - services/shippingService.ts",
+    "app_name": "Codex",
+    "chars": "// BUG: shipping cost calculation wrong for international\n// domestic: price = weight * 0.5\n// international: price = weight * 1.5 + handling fee\nfunction calculateShipping(order: Order): number {\n  const base = order.weight * 0.5\n  if (order.isInternational) {\n    return base * 1.5  // BUG: missing handling fee!\n  }\n  return base\n}",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "VS Code - services/shippingService.ts"
+  },
+  {
+    "timestamp": "2026-04-18T10:36:00",
+    "window_title": "Terminal - shipping service tests",
+    "app_name": "Terminal",
+    "chars": "npm test -- shippingService\n\u2713 should calculate domestic shipping correctly\n\u2717 should calculate international shipping correctly\n  Expected: 156.50, Received: 150.00\n  Missing $6.50 handling fee",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Terminal - shipping service tests"
+  },
+  {
+    "timestamp": "2026-04-18T12:00:00",
+    "window_title": "Slack - #engineering",
+    "app_name": "Slack",
+    "chars": "Deploy to staging is done. Breaking changes in auth service - needs fresh env vars. Check #announcements for details.",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Slack - #engineering"
+  },
+  {
+    "timestamp": "2026-04-18T12:05:00",
+    "window_title": "VS Code - services/shippingService.ts",
+    "app_name": "VS Code",
+    "chars": "// Hotfix: add handling fee for international\nconst HANDLING_FEE_CENTS = 650\nfunction calculateShipping(order: Order): number {\n  const baseCents = order.weight * 50  // $0.50 per lb in cents\n  if (order.isInternational) {\n    return (baseCents * 1.5 + HANDLING_FEE_CENTS) / 100\n  }\n  return baseCents / 100\n}",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "VS Code - services/shippingService.ts"
+  },
+  {
+    "timestamp": "2026-04-18T12:08:00",
+    "window_title": "Chrome - Gmail - Re: API rate limit increase",
+    "app_name": "Chrome",
+    "chars": "Approved. Increasing your tier from 1000 to 10000 req/hour. New API key sent. Let me know if you need more.",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Chrome - Gmail - Re: API rate limit increase"
+  },
+  {
+    "timestamp": "2026-04-18T13:00:00",
+    "window_title": "VS Code - PR #234 review",
+    "app_name": "VS Code",
+    "chars": "// PR #234: Add user avatar upload\n// Changes:\n// 1. POST /api/users/:id/avatar - multipart upload\n// 2. S3 storage with CloudFront CDN\n// 3. Auto-resize to 200x200, 400x400\n// 4. Allowed types: jpg, png, webp\n\n// Comment: consider adding rate limiting per user to prevent abuse",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "VS Code - PR #234 review"
+  },
+  {
+    "timestamp": "2026-04-18T13:10:00",
+    "window_title": "VS Code - services/avatarService.ts",
+    "app_name": "VS Code",
+    "chars": "import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'\nimport sharp from 'sharp'\n\nconst s3 = new S3Client({ region: 'us-east-1' })\nconst BUCKET = 'user-avatars-prod'\n\nasync function uploadAvatar(userId: string, file: Buffer): Promise<string> {\n  const resized = await sharp(file).resize(200, 200).jpeg({ quality: 80 }).toBuffer()\n  const key = `avatars/${userId}/200.jpg`\n  await s3.send(new PutObjectCommand({\n    Bucket: BUCKET, Key: key,\n    Body: resized, ContentType: 'image/jpeg'\n  }))\n  return `https://cdn.example.com/${key}`\n}",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "VS Code - services/avatarService.ts"
+  },
+  {
+    "timestamp": "2026-04-18T13:15:00",
+    "window_title": "Chrome - GitHub PR #234",
+    "app_name": "Chrome",
+    "chars": "PR Review:\n- [ ] Consider adding file size limit (max 5MB)\n- [ ] Add virus scan before S3 upload\n- [ ] Test with 10MB+ files\n- [ ] Add avatar deletion endpoint\n\nLGTM with those nits addressed.",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Chrome - GitHub PR #234"
+  },
+  {
+    "timestamp": "2026-04-18T13:20:00",
+    "window_title": "VS Code - services/avatarService.ts",
+    "app_name": "VS Code",
+    "chars": "// PR feedback addressed:\n// 1. Added 5MB size limit\n// 2. Added virus scan with clamav\n// 3. Added DELETE /api/users/:id/avatar\n\nconst MAX_FILE_SIZE = 5 * 1024 * 1024\nasync function uploadAvatar(userId: string, file: Buffer): Promise<string> {\n  if (file.length > MAX_FILE_SIZE) {\n    throw new Error('File too large: max 5MB')\n  }",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "VS Code - services/avatarService.ts"
+  },
+  {
+    "timestamp": "2026-04-18T14:00:00",
+    "window_title": "Terminal - postgres debug",
+    "app_name": "Terminal",
+    "chars": "psql -h prod-db.example.com -U app -d myapp\nmyapp=> SELECT * FROM pg_stat_activity WHERE state = 'active';\n pid | usename | query | wait_event_type | wait_event\n-----+---------+-------+-----------------+-----------\n1234 | app     | SELECT | Lock            | transaction_id\n\n// Found it: long-running transaction holding row lock on orders table",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Terminal - postgres debug"
+  },
+  {
+    "timestamp": "2026-04-18T14:05:00",
+    "window_title": "Terminal - postgres debug",
+    "app_name": "Terminal",
+    "chars": "myapp=> SELECT pg_terminate_backend(1234);\n// Row lock released. Orders table now responsive.\n// Root cause: API request timed out but didn't close transaction.",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Terminal - postgres debug"
+  },
+  {
+    "timestamp": "2026-04-18T14:08:00",
+    "window_title": "VS Code - services/database.ts",
+    "app_name": "VS Code",
+    "chars": "// Fixed: always close transactions in finally block\nasync function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {\n  const client = await pool.connect()\n  try {\n    await client.query('BEGIN')\n    const result = await fn(client)\n    await client.query('COMMIT')\n    return result\n  } catch (err) {\n    await client.query('ROLLBACK')\n    throw err\n  } finally {\n    client.release()  // Always release!\n  }\n}",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "VS Code - services/database.ts"
+  },
+  {
+    "timestamp": "2026-04-18T16:30:00",
+    "window_title": "Outlook - Inbox",
+    "app_name": "Outlook",
+    "chars": "Daily review:\n- Auth middleware: RS256 upgrade complete, ready for deploy\n- Order discount bug: fixed (floating point precision)\n- Shipping international: hotfixed with handling fee\n- Code review #234: addressed feedback\n- Postgres lock: resolved, added timeout fix",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Outlook - Inbox"
+  },
+  {
+    "timestamp": "2026-04-18T16:35:00",
+    "window_title": "Slack - #engineering",
+    "app_name": "Slack",
+    "chars": "EOD status:\n\u2713 Auth middleware PR ready for merge\n\u2713 Fixed discount calculation bug\n\u2713 Hotfixed shipping international rates\n\u2713 Deployed postgres fix\n\nTomorrow: Code review #235, start on notifications service",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "Slack - #engineering"
+  },
+  {
+    "timestamp": "2026-04-18T16:40:00",
+    "window_title": "VS Code - git commit",
+    "app_name": "VS Code",
+    "chars": "git add -A && git commit -m 'fix: multiple production bugs\n\n- auth: switch to RS256, fix token expiry times\n- orders: fix floating point discount calculation\n- shipping: add handling fee for international\n- db: always release connection in finally block\n\nCloses #201, #203, #205'",
+    "source": "manual",
+    "focus_active": true,
+    "window_id": "VS Code - git commit"
+  }
+]
