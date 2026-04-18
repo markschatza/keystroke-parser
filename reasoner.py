@@ -55,23 +55,38 @@ class Reasoner:
         bursts: List[Burst],
         return_sessions: bool = True,
         return_summary: bool = True,
+        use_chunking: bool = True,
     ) -> Dict[str, Any]:
         """
         Full reasoning pipeline for a list of bursts.
 
+        When use_chunking=True (default): uses time-boxed chunking to handle
+        long days without overflowing the LLM context window.
+
         Returns dict with:
           - sessions: List[Session] (db-query-layer compatible)
           - daily_summary: str
-          - candidate_count: int (how many candidates were fed to LLM)
+          - candidate_count: int
+          - chunk_count: int (number of hour chunks processed)
         """
         if not bursts:
-            return {"sessions": [], "daily_summary": "No activity recorded.", "candidate_count": 0}
+            return {"sessions": [], "daily_summary": "No activity recorded.",
+                    "candidate_count": 0, "chunk_count": 0}
 
-        # Pre-group into candidates (lightweight, LLM has final say)
+        if use_chunking:
+            from chunker import ChunkProcessor
+            processor = ChunkProcessor(reasoner=self)
+            result = processor.process_day(bursts, api_key=self.api_key)
+            return {
+                "sessions": result["sessions"],
+                "daily_summary": result["daily_summary"],
+                "candidate_count": result["candidate_count"],
+                "chunk_count": result["chunk_count"],
+            }
+
+        # Fallback: non-chunked path for short days
         sessionizer = Sessionizer()
         candidates = sessionizer.group_bursts(bursts)
-
-        # Let LLM reason over them
         sessions = self._reason_sessions(candidates) if return_sessions else []
         summary = self._reason_daily_summary(candidates) if return_summary else ""
 
@@ -79,6 +94,7 @@ class Reasoner:
             "sessions": sessions,
             "daily_summary": summary,
             "candidate_count": len(candidates),
+            "chunk_count": 1,
         }
 
     def reason_day_from_db(

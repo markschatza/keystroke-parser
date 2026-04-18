@@ -224,6 +224,8 @@ class Session:
     """
     Final reasoned session — matches db-query-layer schema exactly.
     Produced by reasoner.py after LLM reasoning over CandidateSessions.
+    Optional fields (set by chunking pipeline):
+    - chunk_id: which hour chunk this session came from
     """
     date: str
     start_time: str
@@ -234,6 +236,7 @@ class Session:
     topic: str
     chars: int
     duration_minutes: int
+    chunk_id: int = -1  # -1 means not from chunked processing
 
 
 def save_sessions(sessions: List[Session], db_path: Path) -> None:
