@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """
-LLM-based summarizer for keystroke sessions.
-Takes raw text from a session and generates work_type + topic.
+Lightweight LLM-based classifier for individual sessions.
+For full day reasoning with sessionization, use reasoner.py instead.
+
+This module provides single-session classification without the full reasoning pipeline:
+- classify_work_type(text) → work_type label
+- extract_topic(text, window_title) → topic label
+
+These are used by the rule-based fallback in reasoner.py, or can be called directly
+on any text without needing the full burst→session pipeline.
 """
 
 import os
-import json
 import re
 import requests
 from pathlib import Path
@@ -13,7 +19,7 @@ from typing import Optional
 
 
 class LLMSummarizer:
-    """Uses MiniMax to classify work type and extract topic."""
+    """Uses MiniMax to classify work type and extract topic from session text."""
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.environ.get("MINIMAX_API_KEY", "")
@@ -56,7 +62,11 @@ class LLMSummarizer:
         return topic[:80]
 
     def summarize_day(self, sessions: list) -> str:
-        """Generate a paragraph summary of a day's sessions."""
+        """
+        Generate a paragraph summary of a day's sessions.
+        Note: For full day reasoning with sessionization, use Reasoner.reason_day() instead.
+        This is a lightweight alternative that skips the sessionization step.
+        """
         if not self.api_key or not sessions:
             return "No sessions to summarize."
 
@@ -76,7 +86,7 @@ class LLMSummarizer:
 
         return self._call(prompt).strip()
 
-    def _call(self, prompt: str) -> str:
+    def _call(self, prompt: str, temperature: float = 0.3, max_tokens: int = 200) -> str:
         """Make a MiniMax API call."""
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -85,8 +95,8 @@ class LLMSummarizer:
         payload = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.3,
-            "max_tokens": 200
+            "temperature": temperature,
+            "max_tokens": max_tokens,
         }
 
         try:
@@ -112,7 +122,10 @@ def load_api_key() -> str:
     if env_path.exists():
         with open(env_path) as f:
             for line in f:
-                if "MINIMAX_API_KEY=" in line:
-                    key = line.split("MINIMAX_API_KEY=", 1)[1].strip()
-                    return re.sub(r"[\x00-\x1f\x7f-\x9f]", "", key)
+                if "MINIMAX_API_KEY" in line:
+                    parts = line.strip().split("MINIMAX_API_KEY=", 1)
+                    if len(parts) > 1:
+                        key = parts[1].strip()
+                        key = key.strip('"').strip("'")
+                        return re.sub(r"[\x00-\x1f\x7f-\x9f]", "", key)
     return ""
