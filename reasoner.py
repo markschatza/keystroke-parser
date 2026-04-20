@@ -42,8 +42,19 @@ class Reasoner:
     """
 
     def __init__(self, api_key: Optional[str] = None, model: str = "MiniMax-M2.7"):
-        self.api_key = api_key or os.environ.get("MINIMAX_API_KEY", "")
-        self.base_url = "https://api.minimax.io/v1/text"
+        # Agentic reasoner for deliberate multi-pass reasoning (opt-in via env var)
+        if os.environ.get("USE_AGENTIC_REASONER", "1") == "1":
+            from agentic_reasoner import AgenticReasoner
+            _key = api_key or os.environ.get("MINIMAX_API_KEY", "") or load_api_key()
+            _base = os.environ.get("MINIMAX_BASE_URL", "https://api.minimax.io")
+            self._delegate = AgenticReasoner(api_key=_key, base_url=_base, model=model)
+            self._delegate_loaded = True
+        else:
+            self._delegate = None
+            self._delegate_loaded = False
+
+        self.api_key = api_key or os.environ.get("MINIMAX_API_KEY", "") or load_api_key()
+        self.base_url = os.environ.get("MINIMAX_BASE_URL", "https://api.minimax.io")
         self.model = model
 
     # -------------------------------------------------------------------------
@@ -69,6 +80,41 @@ class Reasoner:
           - candidate_count: int
           - chunk_count: int (number of hour chunks processed)
         """
+        if self._delegate_loaded:
+            from sessionizer import Session as SessionCls
+            result = self._delegate.reason_day(bursts)
+            sessions = []
+            for ag_sess in result.get("sessions", []):
+                burst_ids = ag_sess.get("burst_ids", [])
+                if not burst_ids:
+                    continue
+                sess_bursts = [bursts[i] for i in burst_ids if 0 <= i < len(bursts)]
+                if not sess_bursts:
+                    continue
+                from datetime import datetime
+                t0 = min(datetime.fromisoformat(b.timestamp) for b in sess_bursts)
+                t1 = max(datetime.fromisoformat(b.timestamp) for b in sess_bursts)
+                date_str = sess_bursts[0].timestamp[:10]
+                chars = sum(b.char_count for b in sess_bursts)
+                dur_min = max(1, int((t1 - t0).total_seconds() / 60))
+                sessions.append(SessionCls(
+                    date=date_str,
+                    start_time=t0.strftime("%H:%M:%S"),
+                    end_time=t1.strftime("%H:%M:%S"),
+                    app_name=ag_sess.get("app_name") or sess_bursts[0].app_name,
+                    window_title=ag_sess.get("window_title") or sess_bursts[0].window_title,
+                    work_type=ag_sess.get("work_type", "writing"),
+                    topic=ag_sess.get("topic", ""),
+                    chars=chars,
+                    duration_minutes=dur_min,
+                ))
+            return {
+                "sessions": sessions,
+                "daily_summary": result.get("daily_summary", ""),
+                "candidate_count": len(sessions),
+                "chunk_count": 1,
+            }
+
         if not bursts:
             return {"sessions": [], "daily_summary": "No activity recorded.",
                     "candidate_count": 0, "chunk_count": 0}
@@ -115,11 +161,48 @@ class Reasoner:
     # Session reasoning
     # -------------------------------------------------------------------------
 
-    def _reason_sessions(self, candidates: List[CandidateSession]) -> List[Session]:
+    def _reason_sessions(self, candidates: List[CandidateSession]) -> List["Session"]:
         """
         Ask the LLM to analyze candidate sessions and produce final sessions.
         The LLM can: merge candidates, split them, reassign work_type/topic.
         """
+        if self._delegate_loaded:
+            # Convert CandidateSessions → raw bursts for agentic reasoner
+            from burst import Burst
+            all_bursts = []
+            for c in candidates:
+                all_bursts.extend(c.bursts)
+            # Re-run agentic on these bursts (it handles its own sessionization)
+            result = self._delegate.reason_day(all_bursts)
+            # Convert agentic sessions → Session objects
+            from sessionizer import Session as SessionCls
+            sessions = []
+            for ag_sess in result.get("sessions", []):
+                burst_ids = ag_sess.get("burst_ids", [])
+                if not burst_ids:
+                    continue
+                sess_bursts = [b for b in all_bursts if b.burst_id in burst_ids]
+                if not sess_bursts:
+                    continue
+                from datetime import datetime
+                t0 = min(datetime.fromisoformat(b.timestamp) for b in sess_bursts)
+                t1 = max(datetime.fromisoformat(b.timestamp) for b in sess_bursts)
+                date_str = sess_bursts[0].timestamp[:10]
+                chars = sum(b.char_count for b in sess_bursts)
+                dur_min = max(1, int((t1 - t0).total_seconds() / 60))
+                sessions.append(SessionCls(
+                    date=date_str,
+                    start_time=t0.strftime("%H:%M:%S"),
+                    end_time=t1.strftime("%H:%M:%S"),
+                    app_name=ag_sess.get("app_name", sess_bursts[0].app_name),
+                    window_title=ag_sess.get("window_title", ""),
+                    work_type=ag_sess.get("work_type", "writing"),
+                    topic=ag_sess.get("topic", ""),
+                    chars=chars,
+                    duration_minutes=dur_min,
+                ))
+            return sessions
+
         if not self.api_key:
             # Fallback: just use candidates directly with rule-based classification
             return self._rule_based_sessions(candidates)
@@ -329,7 +412,7 @@ Write your summary in a natural, narrative style."""
 
         try:
             response = requests.post(
-                f"{self.base_url}/chatcompletion_v2",
+                f"{self.base_url}/v1/chat/completions",
                 headers=headers,
                 json=payload,
                 timeout=30,

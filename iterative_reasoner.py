@@ -130,8 +130,6 @@ class IterativeReasoner:
 
         # Pass 1: LLM groups bursts into sessions
         grouping_result = self._pass1_grouping(burst_refs, sorted_bursts)
-        
-        # Parse grouping into sessions
         raw_sessions = grouping_result["sessions"]  # List of dicts from LLM
 
         # Pass 2: LLM labels each session
@@ -148,7 +146,7 @@ class IterativeReasoner:
             "pass1_tokens_used": grouping_result.get("tokens_used", 0),
             "pass2_tokens_used": pass2_usage,
             "pass3_tokens_used": pass3_usage,
-            "total_api_calls": 3,
+            "total_api_calls": grouping_result.get("num_chunks", 1) + 1 + 1,  # Pass1 chunks + Pass2 (1) + Pass3 (1)
         }
 
     def reason_day_from_db(self, date_str: str) -> Dict[str, Any]:
@@ -195,14 +193,35 @@ class IterativeReasoner:
 
         def process_chunk(chunk_refs, global_offset, carry):
             """Process one chunk and return session groups. Runs in thread pool."""
-            burst_listing = []
+            # Annotate bursts with gap warnings for long gaps
+            prev_ts = None
+            annotated = []
             for i, ref in enumerate(chunk_refs):
+                ts = ref.timestamp
+                gap_note = ""
+                if prev_ts:
+                    try:
+                        from datetime import datetime
+                        t_prev = datetime.fromisoformat(prev_ts)
+                        t_curr = datetime.fromisoformat(ts)
+                        gap_min = int((t_curr - t_prev).total_seconds() / 60)
+                        if gap_min >= 30:
+                            gap_note = f" ← {gap_min}min gap"
+                        elif gap_min >= 5:
+                            gap_note = f" ({gap_min}min)"
+                    except:
+                        pass
+                prev_ts = ts
+
                 window = ref.window_title.split(' - ')[-1] if ' - ' in ref.window_title else ref.window_title
-                burst_listing.append("[%d] %s | %s | %s" % (
+                text_snippet = ref.text_preview[:50].replace("\n", " ")
+                annotated.append("[%d] %s | %-10s | %-25s |%s %s" % (
                     i,
                     ref.timestamp[11:16],
                     ref.app_name[:10],
-                    window[:40]
+                    window[:25],
+                    gap_note,
+                    text_snippet
                 ))
 
             num_bursts = len(chunk_refs)
@@ -211,15 +230,26 @@ class IterativeReasoner:
 
             prompt = f"""You are sessionizing a developer's keystroke bursts.
 
-RULES (follow in order):
-1. SWITCH to different file/window = NEW session (even 1-minute gaps)
-2. SWITCH to different app = NEW session
-3. Gap > 30 min = NEW session (meeting/break)
-4. Same window + gap < 5 min = SAME session
-5. Be AGGRESSIVE about splitting — prefer MORE sessions over fewer merged ones{carry_note}
+RULES:
+1. Gap > 30 min = NEW session (meeting/break)
+2. Different SEMANTIC TASK = NEW session
+   - Fixing a bug = different from implementing a new feature = different from code review
+   - "Add handling fee for international" (bug fix in shippingService) = different from
+     "user avatar upload" (new feature in avatarService) = different from
+     "PR #234 review" (reading/coordination)
+3. Same file/feature being iterated on = SAME session
+   - Multiple Codex bursts on auth/middleware.py across 30 min = same auth session
+4. Quick coordination (< 5 min, Slack/email) during active dev = part of that session{carry_note}
+
+CRITICAL EXAMPLES of how to split:
+- Bug fix (shippingService hotfix) at 12:05 ≠ New feature (avatarService) at 13:00 → SPLIT
+- Implementing feature (avatarService.ts) at 13:10 ≠ PR review (reading) at 13:15 → SPLIT
+- Fix session (postgres debug) at 14:00 ≠ EOD standup at 16:30 → SPLIT{carry_note}
+
+When in doubt, SPLIT. Better 8 clean sessions than 5 messy ones.{carry_note}
 
 INPUT — bursts {global_offset} to {global_offset + num_bursts - 1}:
-{chr(10).join(burst_listing)}
+{chr(10).join(annotated)}
 
 OUTPUT — JSON object with sessions array:
 {{"sessions": [
@@ -229,14 +259,30 @@ OUTPUT — JSON object with sessions array:
 Every burst 0 to {max_burst_id} must appear exactly once in this chunk's output. JSON only."""
 
             response = self._call(prompt, temperature=0.3, max_tokens=16000)
-            json_str = self._extract_json(response)
+            json_str = self._extract_json_for_pass(response, "sessions")
             if not json_str:
                 return []
 
             try:
                 data = json.loads(json_str)
-                return data.get("sessions", [])
-            except json.JSONDecodeError:
+                if isinstance(data, dict) and "sessions" in data:
+                    return data.get("sessions", [])
+                elif isinstance(data, list):
+                    return data
+                else:
+                    return []
+            except json.JSONDecodeError as e:
+                # If JSON is truncated/malformed, try to repair by truncating to last complete object
+                repaired = self._repair_json(json_str)
+                if repaired:
+                    try:
+                        data = json.loads(repaired)
+                        if isinstance(data, dict) and "sessions" in data:
+                            return data.get("sessions", [])
+                        elif isinstance(data, list):
+                            return data
+                    except json.JSONDecodeError:
+                        pass
                 return []
 
         # Process all chunks in parallel
@@ -288,7 +334,8 @@ Every burst 0 to {max_burst_id} must appear exactly once in this chunk's output.
         return {
             "sessions": final_sessions,
             "full_reasoning": f"Processed {len(chunks)} chunks in parallel",
-            "tokens_used": 0,  # Would need to track from futures for accuracy
+            "tokens_used": 0,
+            "num_chunks": len(chunks),
         }
 
     # -------------------------------------------------------------------------
@@ -302,13 +349,159 @@ Every burst 0 to {max_burst_id} must appear exactly once in this chunk's output.
         burst_refs: List[RawBurstRef],
     ) -> tuple:
         """
-        Pass 2: Label each session in parallel using ThreadPoolExecutor.
+        Pass 2: Label each session. Defaults to a SINGLE batched call
+        for efficiency (1 API call instead of N). Set parallel=True to
+        fall back to per-session parallel calls.
+        """
+        return self._pass2_labeling_batched(raw_sessions, sorted_bursts, burst_refs)
 
-        For each session group from Pass 1, the LLM determines:
-        - work_type: debugging | writing | reading | communicating | planning
-        - topic: specific task in ≤10 words
-        - narrative: what happened in 1-2 sentences
-        - confidence: high | medium | low
+    def _pass2_labeling_batched(
+        self,
+        raw_sessions: List[Dict],
+        sorted_bursts: List[Burst],
+        burst_refs: List[RawBurstRef],
+    ) -> tuple:
+        """
+        Pass 2: Batch ALL sessions into a SINGLE API call.
+        Much more efficient — one API call instead of one per session.
+        """
+        if not raw_sessions:
+            return [], 0
+
+        # Build session blocks for the prompt
+        session_blocks = []
+        for sess in raw_sessions:
+            burst_ids = sess.get("burst_ids", [])
+            if not burst_ids:
+                continue
+
+            burst_texts = []
+            for bid in burst_ids:
+                if 0 <= bid < len(sorted_bursts):
+                    b = sorted_bursts[bid]
+                    burst_texts.append(f"[{bid}] {b.chars[:200]}")
+
+            full_text = "\n".join(burst_texts)
+            if len(full_text) > 2500:
+                full_text = full_text[:2500] + "\n... (truncated)"
+
+            first_ts = sorted_bursts[burst_ids[0]].timestamp
+            last_ts = sorted_bursts[burst_ids[-1]].timestamp
+
+            try:
+                t1 = datetime.fromisoformat(first_ts)
+                t2 = datetime.fromisoformat(last_ts)
+                duration_min = max(1, int((t2 - t1).total_seconds() / 60))
+            except:
+                duration_min = 1
+
+            chars_in_sess = sum(
+                sorted_bursts[i].char_count
+                for i in burst_ids if 0 <= i < len(sorted_bursts)
+            )
+
+            session_blocks.append({
+                "session_id": sess["session_id"],
+                "grouping_reasoning": sess.get("grouping_reasoning", ""),
+                "first_ts": first_ts[11:16],
+                "last_ts": last_ts[11:16],
+                "duration_min": duration_min,
+                "num_bursts": len(burst_ids),
+                "chars_in_sess": chars_in_sess,
+                "text_preview": full_text,
+            })
+
+        prompt = f"""Analyze and label each keystroke session below.
+
+work_type options:
+- debugging: fixing bugs, investigating errors, tracing issues, troubleshooting
+- writing: implementing new features, writing code/modules, creating files, building
+- reading: code review, reading docs, investigating/understanding code, analyzing
+- communicating: Slack, email, messages, discussions, code reviews with others
+- planning: planning, scoping, sprint planning, architecture design, outlining
+
+topic: specific task in ≤10 words. Be concrete.
+narrative: 1-2 sentences describing what happened. Name files, features, bugs.
+confidence: high (clear task context), medium (some context), low (minimal context)
+
+=== SESSIONS ===
+{json.dumps(session_blocks, indent=2)}
+===
+
+OUTPUT — JSON array of labels, one per session:
+[
+  {{"session_id": 1, "work_type": "...", "topic": "...", "narrative": "...", "confidence": "high"}},
+  ...
+]
+
+Respond ONLY with the JSON array."""
+
+        response = self._call(prompt, temperature=0.3, max_tokens=3000)
+        json_str = self._extract_json(response)
+
+        # Build lookup from response
+        label_map = {}
+        if json_str:
+            try:
+                labels = json.loads(json_str)
+                if isinstance(labels, list):
+                    for lbl in labels:
+                        label_map[lbl["session_id"]] = lbl
+            except json.JSONDecodeError:
+                pass
+
+        # Assemble final sessions, falling back to defaults for any missing
+        labeled = []
+        for sess in raw_sessions:
+            burst_ids = sess.get("burst_ids", [])
+            if not burst_ids:
+                continue
+
+            first_ts = sorted_bursts[burst_ids[0]].timestamp
+            last_ts = sorted_bursts[burst_ids[-1]].timestamp
+
+            try:
+                dur_sec = int((datetime.fromisoformat(last_ts) - datetime.fromisoformat(first_ts)).total_seconds())
+            except:
+                dur_sec = 60
+
+            chars_in_sess = sum(
+                sorted_bursts[i].char_count
+                for i in burst_ids if 0 <= i < len(sorted_bursts)
+            )
+
+            lbl = label_map.get(sess["session_id"], {})
+
+            labeled.append(LLMReasonedSession(
+                session_id=sess["session_id"],
+                burst_ids=burst_ids,
+                start_time=first_ts[11:16],
+                end_time=last_ts[11:16],
+                app_name=burst_refs[burst_ids[0]].app_name if burst_ids else "Unknown",
+                window_title=burst_refs[burst_ids[0]].window_title if burst_ids else "",
+                total_chars=lbl.get("chars_in_session", chars_in_sess),
+                total_duration_seconds=dur_sec,
+                work_type=lbl.get("work_type", "writing"),
+                topic=lbl.get("topic", f"Session {sess['session_id']}")[:80],
+                narrative=lbl.get("narrative", sess.get("grouping_reasoning", "")),
+                grouping_reasoning=sess.get("grouping_reasoning", ""),
+                confidence=lbl.get("confidence", "low"),
+            ))
+
+        labeled.sort(key=lambda x: x.session_id)
+        tokens_used = len(prompt) // 4 + len(response) // 4
+        return labeled, tokens_used
+
+    def _pass2_labeling_parallel(
+        self,
+        raw_sessions: List[Dict],
+        sorted_bursts: List[Burst],
+        burst_refs: List[RawBurstRef],
+    ) -> tuple:
+        """
+        Pass 2: Label each session in parallel using ThreadPoolExecutor.
+        One API call per session — useful for debugging or when you need
+        isolation between sessions (can retry individual failures).
         """
 
         def label_session(sess):
@@ -516,15 +709,20 @@ Respond ONLY with the JSON object."""
         response = self._call(prompt, temperature=0.3, max_tokens=800)
         tokens_used = len(prompt) // 4 + len(response) // 4
 
-        json_str = self._extract_json(response)
+        json_str = self._extract_json_for_pass(response, "daily_summary")
         if json_str:
             try:
                 data = json.loads(json_str)
-                return (
-                    data.get("daily_summary", "Summary not available."),
-                    data.get("patterns", ""),
-                    tokens_used,
-                )
+                # Handle malformed responses that are arrays instead of objects
+                if isinstance(data, list) and len(data) > 0:
+                    # Try to extract summary from the first array item
+                    data = data[0]
+                if isinstance(data, dict):
+                    return (
+                        data.get("daily_summary", "Summary not available."),
+                        data.get("patterns", ""),
+                        tokens_used,
+                    )
             except json.JSONDecodeError:
                 pass
 
@@ -551,13 +749,8 @@ Respond ONLY with the JSON object."""
             ))
         return refs
 
-    def _call(self, prompt: str, temperature: float = 0.3, max_tokens: int = 1500) -> str:
-        """Make a MiniMax API call.
-        
-        Uses response_format=json_object for non-reasoning models (MiniMax-M2)
-        to ensure clean JSON output without markdown wrappers.
-        For reasoning models (MiniMax-M2.7), relies on _extract_json to strip CoT.
-        """
+    def _call(self, prompt: str, temperature: float = 0.3, max_tokens: int = 1500, retries: int = 3) -> str:
+        """Make a MiniMax API call with automatic retry on rate limit."""
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
@@ -567,63 +760,166 @@ Respond ONLY with the JSON object."""
             "messages": [{"role": "user", "content": prompt}],
             "temperature": temperature,
             "max_tokens": max_tokens,
+            "extra_body": {"thinking": {"type": "off"}},
         }
 
-        # For non-reasoning models, force JSON output
-        if "M2.7" not in self.model and "reasoning" not in self.model.lower():
-            payload["response_format"] = {"type": "json_object"}
-
-        try:
-            response = requests.post(
-                f"{self.base_url}/chatcompletion_v2",
-                headers=headers,
-                json=payload,
-                timeout=120,
-            )
-            data = response.json()
-            if "choices" in data and data["choices"]:
-                return data["choices"][0]["message"]["content"]
-            elif "base_resp" in data:
-                return f"API Error: {data['base_resp'].get('status_msg', 'unknown')}"
-        except Exception as e:
-            return f"Error: {str(e)}"
+        for attempt in range(retries):
+            try:
+                response = requests.post(
+                    f"{self.base_url}/chatcompletion_v2",
+                    headers=headers,
+                    json=payload,
+                    timeout=120,
+                )
+                data = response.json()
+                if "choices" in data and data["choices"]:
+                    return data["choices"][0]["message"]["content"]
+                elif "base_resp" in data:
+                    status_msg = data["base_resp"].get("status_msg", "unknown")
+                    if "rate" in status_msg.lower() or "limit" in status_msg.lower():
+                        wait = 2 ** attempt
+                        print(f"[DEBUG _call] Rate limited, retrying in {wait}s (attempt {attempt+1}/{retries})")
+                        import time; time.sleep(wait)
+                        continue
+                    return f"API Error: {status_msg}"
+                else:
+                    print(f"[DEBUG _call] Unexpected response status={response.status_code}, data={str(data)[:200]}")
+            except Exception as e:
+                print(f"[DEBUG _call] Exception on attempt {attempt+1}: {e}")
+                if attempt < retries - 1:
+                    import time; time.sleep(2 ** attempt)
         return ""
 
     def _extract_json(self, text: str) -> Optional[str]:
-        """Try to extract a JSON object from LLM response text.
-        
-        Handles chain-of-thought models that wrap output in <result>...</result>
-        orSION> or plain text.
-        """
-        # Strip chain-of-thought / reasoning tags if present
+        # Remove code fences
+        for fence in ["```json", "```", "```yaml", "```python"]:
+            if text.startswith(fence):
+                text = text[len(fence):]
+            if text.endswith(fence):
+                text = text[:-len(fence)]
         text = text.strip()
-        if text.startswith("<think>"):
-            # Find the closing tag
-            end_tag = text.find("</think>")
-            if end_tag != -1:
-                text = text[end_tag + len("</think>"):].strip()
-            # Also try to find content wrapped in other tags
-            for tag in ["<result>", "</result>", "<output>", "</output>", "<response>", "</response>"]:
-                start = text.find(tag)
-                if start != -1:
-                    text = text[start + len(tag):]
-                    end = text.find(tag.replace("<", "</"))
-                    if end != -1:
-                        text = text[:end]
 
-        # Look for JSON object
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return text[start:end+1]
+        # Find the closing tag
+        end_tag = text.find("</think>")
+        if end_tag != -1:
+            text = text[end_tag + len("</think>"):].strip()
+        # Also try to find content wrapped in other tags
+        for tag in ["<result>", "</result>", "<output>", "</output>", "<response>", "</response>"]:
+            start = text.find(tag)
+            if start != -1:
+                text = text[start + len(tag):]
+                end = text.find(tag.replace("<", "</"))
+                if end != -1:
+                    text = text[:end]
 
-        # Fallback: try JSON array
-        start = text.find("[")
-        end = text.rfind("]")
-        if start != -1 and end != -1 and end > start:
-            return text[start:end+1]
+        # Prefer JSON array over object when both present (array spans more chars)
+        arr_start = text.find("[")
+        arr_end = text.rfind("]")
+        obj_start = text.find("{")
+        obj_end = text.rfind("}")
+
+        if arr_start != -1 and arr_end != -1 and arr_end > arr_start:
+            if obj_start != -1 and obj_end != -1 and obj_end > obj_start:
+                # Pick whichever spans more text
+                if arr_end - arr_start > obj_end - obj_start:
+                    return text[arr_start:arr_end+1]
+            return text[arr_start:arr_end+1]
+
+        if obj_start != -1 and obj_end != -1 and obj_end > obj_start:
+            return text[obj_start:obj_end+1]
 
         return None
+
+    def _repair_json(self, malformed_json: str) -> Optional[str]:
+        """
+        Attempt to repair truncated/malformed JSON by truncating to the last
+        structurally complete prefix. Handles:
+        - Unclosed strings with escape sequences
+        - Trailing incomplete objects/arrays
+        - Missing closing braces
+        """
+        if not malformed_json:
+            return None
+
+        # Strategy: find the last complete object or array item
+        # Walk backwards from the end, find the last '}' or ']' that closes a top-level structure
+        depth = 0
+        in_string = False
+        escape_next = False
+        
+        for i in range(len(malformed_json) - 1, -1, -1):
+            c = malformed_json[i]
+            
+            if escape_next:
+                escape_next = False
+                continue
+            
+            if c == '\\' and in_string:
+                escape_next = True
+                continue
+            
+            if c == '"':
+                in_string = not in_string
+                continue
+            
+            if in_string:
+                continue
+            
+            if c == '}' or c == ']':
+                depth += 1
+            elif c == '{' or c == '[':
+                depth -= 1
+            
+            # Found a top-level close?
+            if depth > 0 and c in '}]':
+                continue
+            if depth == 0 and c in '}]':
+                # This might be a valid end point
+                # Try parsing from here
+                candidate = malformed_json[:i+1]
+                try:
+                    json.loads(candidate)
+                    return candidate  # Valid! Return it
+                except json.JSONDecodeError:
+                    pass
+        
+        # Fallback: try truncating to last valid array of complete objects
+        # Find last '}' that might close the outermost object
+        last_brace = malformed_json.rfind('}')
+        if last_brace > 0:
+            candidate = malformed_json[:last_brace+1]
+            try:
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                pass
+        
+        return None
+
+    def _extract_json_for_pass(self, text: str, expected_key: str) -> Optional[str]:
+        """
+        Extract JSON, preferring a top-level object with expected_key over a bare array.
+        Used by passes that wrap responses in {"sessions": [...]} or similar.
+        """
+        # Try to find {"expected_key": ...} first
+        if expected_key:
+            key_pattern = f'"{expected_key}"'
+            key_pos = text.find(key_pattern)
+            if key_pos != -1:
+                # Back up to the opening brace
+                start = text.rfind("{", 0, key_pos)
+                if start != -1:
+                    # Count braces to find the matching close
+                    depth = 0
+                    for i in range(start, len(text)):
+                        if text[i] == '{':
+                            depth += 1
+                        elif text[i] == '}':
+                            depth -= 1
+                            if depth == 0:
+                                return text[start:i+1]
+        # Fall back to generic extraction
+        return self._extract_json(text)
 
     def _fallback(self, bursts: List[Burst]) -> Dict[str, Any]:
         """Fallback when no API key is available."""
@@ -646,14 +942,19 @@ def load_api_key() -> str:
     """Load MiniMax API key from Hermes config."""
     env_path = Path.home() / ".hermes" / ".env"
     if env_path.exists():
-        with open(env_path) as f:
-            for line in f:
-                if "MINIMAX_API_KEY" in line:
-                    parts = line.strip().split("MINIMAX_API_KEY=", 1)
-                    if len(parts) > 1:
-                        key = parts[1].strip()
-                        key = key.strip('"').strip("'")
-                        return re.sub(r"[\x00-\x1f\x7f-\x9f]", "", key)
+        raw = env_path.read_bytes()
+        decoded = raw.decode('utf-8', errors='replace')
+        # Find FIRST uncommented MINIMAX_API_KEY= line (first one is the real key)
+        for line in decoded.split('\n'):
+            stripped = line.strip()
+            if stripped.startswith('#'):
+                continue
+            if 'MINIMAX_API_KEY' in line and '=' in line:
+                key = line.split('=', 1)[1].strip()
+                # Strip any non-printable chars (like escape sequences)
+                key = ''.join(c for c in key if c.isprintable()).strip()
+                if key and not key.startswith('***'):
+                    return key
     return ""
 
 
