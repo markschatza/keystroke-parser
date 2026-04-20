@@ -1,0 +1,164 @@
+[
+  {
+    "timestamp": "2026-04-22T08:00:00",
+    "app_name": "VS Code",
+    "window_title": "feature/user-prefs.ts",
+    "chars": "export async function getUserPreferences(userId: string) {",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "feature/user-prefs.ts"
+  },
+  {
+    "timestamp": "2026-04-22T08:15:00",
+    "app_name": "VS Code",
+    "window_title": "feature/user-prefs.ts",
+    "chars": "const prefs = await db.query('SELECT * FROM prefs WHERE user_id = $1', [userId])",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "feature/user-prefs.ts"
+  },
+  {
+    "timestamp": "2026-04-22T08:30:00",
+    "app_name": "VS Code",
+    "window_title": "feature/user-prefs.ts",
+    "chars": "return prefs.rows[0] // TODO: cache with Redis",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "feature/user-prefs.ts"
+  },
+  {
+    "timestamp": "2026-04-22T09:00:00",
+    "app_name": "Chrome",
+    "window_title": "meet.google.com",
+    "chars": "Starting standup... what I did yesterday: finished auth middleware...",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "meet.google.com"
+  },
+  {
+    "timestamp": "2026-04-22T09:05:00",
+    "app_name": "Chrome",
+    "window_title": "meet.google.com",
+    "chars": "...what I'm doing today: user preferences feature...",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "meet.google.com"
+  },
+  {
+    "timestamp": "2026-04-22T09:10:00",
+    "app_name": "Chrome",
+    "window_title": "meet.google.com",
+    "chars": "blocking issues: need DB schema approval from alice...",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "meet.google.com"
+  },
+  {
+    "timestamp": "2026-04-22T10:30:00",
+    "app_name": "Chrome",
+    "window_title": "zoom.us",
+    "chars": "Sprint 22 planning... Stories: P0: payment webhook fix, P1: user prefs...",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "zoom.us"
+  },
+  {
+    "timestamp": "2026-04-22T10:35:00",
+    "app_name": "Chrome",
+    "window_title": "zoom.us",
+    "chars": "Adding acceptance criteria for payment webhook story...",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "zoom.us"
+  },
+  {
+    "timestamp": "2026-04-22T11:30:00",
+    "app_name": "Chrome",
+    "window_title": "zoom.us",
+    "chars": "Sprint 22 committed to 32 points. Moving to backlog review...",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "zoom.us"
+  },
+  {
+    "timestamp": "2026-04-22T13:00:00",
+    "app_name": "Slack",
+    "window_title": "huddle",
+    "chars": "Hey, quick sync on the payment service timeline?",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "huddle"
+  },
+  {
+    "timestamp": "2026-04-22T13:10:00",
+    "app_name": "Slack",
+    "window_title": "huddle",
+    "chars": "Yeah the webhook handling should be done by Thursday...",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "huddle"
+  },
+  {
+    "timestamp": "2026-04-22T13:30:00",
+    "app_name": "Slack",
+    "window_title": "huddle",
+    "chars": "Got it, I'll update the estimate. Anything else?",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "huddle"
+  },
+  {
+    "timestamp": "2026-04-22T14:30:00",
+    "app_name": "Chrome",
+    "window_title": "github.com/PR #447",
+    "chars": "Reviewing PR #447: user avatar upload. Changes look good architecturally...",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "github.com/PR #447"
+  },
+  {
+    "timestamp": "2026-04-22T14:45:00",
+    "app_name": "VS Code",
+    "window_title": "services/avatarService.ts",
+    "chars": "// PR feedback: add virus scanning before S3 upload",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "services/avatarService.ts"
+  },
+  {
+    "timestamp": "2026-04-22T15:00:00",
+    "app_name": "Chrome",
+    "window_title": "github.com/PR #447",
+    "chars": "Left detailed review comments on the avatar service. Approving with suggestions.",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "github.com/PR #447"
+  },
+  {
+    "timestamp": "2026-04-22T16:00:00",
+    "app_name": "VS Code",
+    "window_title": "feature/user-prefs.ts",
+    "chars": "// Resuming user preferences work after code reviews...",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "feature/user-prefs.ts"
+  },
+  {
+    "timestamp": "2026-04-22T16:20:00",
+    "app_name": "VS Code",
+    "window_title": "feature/user-prefs.ts",
+    "chars": "export async function updatePreferences(userId: string, prefs: Preferences) {",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "feature/user-prefs.ts"
+  },
+  {
+    "timestamp": "2026-04-22T16:40:00",
+    "app_name": "VS Code",
+    "window_title": "feature/user-prefs.ts",
+    "chars": "await db.query('UPDATE prefs SET ... WHERE user_id = $1', [userId])",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "feature/user-prefs.ts"
+  }
+]

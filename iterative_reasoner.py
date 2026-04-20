@@ -88,8 +88,8 @@ class IterativeReasoner:
     """
 
     def __init__(self, api_key: Optional[str] = None, model: str = "MiniMax-M2"):
-        self.api_key = api_key or os.environ.get("MINIMAX_API_KEY", "")
-        self.base_url = "https://api.minimax.io/v1/text"
+        self.api_key = api_key or os.environ.get("MINIMAX_API_KEY", "") or load_api_key()
+        self.base_url = "https://api.minimax.io"
         self.model = model
 
     # -------------------------------------------------------------------------
@@ -230,23 +230,49 @@ class IterativeReasoner:
 
             prompt = f"""You are sessionizing a developer's keystroke bursts.
 
-RULES:
-1. Gap > 30 min = NEW session (meeting/break)
-2. Different SEMANTIC TASK = NEW session
-   - Fixing a bug = different from implementing a new feature = different from code review
-   - "Add handling fee for international" (bug fix in shippingService) = different from
-     "user avatar upload" (new feature in avatarService) = different from
-     "PR #234 review" (reading/coordination)
-3. Same file/feature being iterated on = SAME session
-   - Multiple Codex bursts on auth/middleware.py across 30 min = same auth session
-4. Quick coordination (< 5 min, Slack/email) during active dev = part of that session{carry_note}
+CORE DECISION FRAMEWORK — use this to reason about every burst:
 
-CRITICAL EXAMPLES of how to split:
-- Bug fix (shippingService hotfix) at 12:05 ≠ New feature (avatarService) at 13:00 → SPLIT
-- Implementing feature (avatarService.ts) at 13:10 ≠ PR review (reading) at 13:15 → SPLIT
-- Fix session (postgres debug) at 14:00 ≠ EOD standup at 16:30 → SPLIT{carry_note}
+1. TIME GAP: If the gap from the previous burst is 30+ minutes → NEW session.
+   (This is a hard boundary. Nothing survives a 30+ min gap.)
 
-When in doubt, SPLIT. Better 8 clean sessions than 5 messy ones.{carry_note}
+2. MEETINGS / COMMUNICATION = ALWAYS SPLIT (even if brief):
+   - Zoom, Google Meet, Teams calls = NEW session (task type: communicating)
+   - Standup meetings, sprint planning calls = NEW session
+   - Team sync Slack messages (not quick pings) = NEW session
+   - A developer writing code then joining a meeting = SPLIT at the meeting
+   - After a meeting ends, returning to coding = NEW session (resumed work)
+
+3. CODE REVIEW READING ≠ CODE BEING REVIEWED = SPLIT:
+   - Reading a PR review in Chrome = different task from the code being reviewed
+   - Writing code feedback in VS Code based on PR review = separate session
+   - Reading PR again after writing feedback = another NEW session
+
+4. SAME TASK = SAME session even if:
+   - Work type varies (debugging → writing → reading are all part of the same debugging session)
+   - App switches (e.g., Chrome → VS Code → Chrome while working on the same feature)
+   - Cross-file within the same feature area (e.g., server.ts ↔ middleware.ts)
+   - Small gaps under 30 min within the work flow
+
+5. QUICK COORDINATION (< 5 min, e.g., Slack ping about a deploy) during active
+   development = MERGE into surrounding development session.
+
+6. INTERRUPT + RETURN: If someone switches to a DIFFERENT task and later returns to the
+   original → SPLIT at the interrupt. The resumed task is a NEW session.
+   (Example: debugging bug A → 10 min on bug B → back to bug A.
+    The first bug A session ends; bug A resumed = new session.)
+
+7. DIFFERENT LOGICAL TASKS even in same app = SPLIT:
+   - userService write → paymentService debug (different task) = SPLIT
+   - api-gateway write → README write (different task) = SPLIT
+   - webhook debug → different feature write = SPLIT
+
+HEURISTIC: When genuinely uncertain → SPLIT. More clean sessions beat fewer messy ones.
+
+COUNTER-EXAMPLES — these must be split but might look like they could merge:
+- Writing code → join Zoom meeting → resume writing = 3 sessions
+- VS Code coding → Chrome PR review reading → VS Code code = 3 sessions  
+- paymentService debug → userService write → paymentService debug = 3 sessions
+- api-gateway write → Slack ping → api-gateway write = same session (quick coordination)
 
 INPUT — bursts {global_offset} to {global_offset + num_bursts - 1}:
 {chr(10).join(annotated)}
@@ -766,7 +792,7 @@ Respond ONLY with the JSON object."""
         for attempt in range(retries):
             try:
                 response = requests.post(
-                    f"{self.base_url}/chatcompletion_v2",
+                    f"{self.base_url}/v1/chat/completions",
                     headers=headers,
                     json=payload,
                     timeout=120,

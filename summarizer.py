@@ -22,7 +22,7 @@ class LLMSummarizer:
     """Uses MiniMax to classify work type and extract topic from session text."""
 
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.environ.get("MINIMAX_API_KEY", "")
+        self.api_key = api_key or os.environ.get("MINIMAX_API_KEY", "") or load_api_key()
         self.base_url = "https://api.minimax.io/v1/text"
         self.model = "MiniMax-M2.7"
 

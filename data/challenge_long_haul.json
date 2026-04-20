@@ -1,0 +1,182 @@
+[
+  {
+    "timestamp": "2026-04-21T08:00:00",
+    "app_name": "VS Code",
+    "window_title": "services/paymentService.ts",
+    "chars": "import { Stripe } from '@stripe/stripe-js'",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "services/paymentService.ts"
+  },
+  {
+    "timestamp": "2026-04-21T08:05:00",
+    "app_name": "VS Code",
+    "window_title": "services/paymentService.ts",
+    "chars": "export async function createPayment(amount: number) {",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "services/paymentService.ts"
+  },
+  {
+    "timestamp": "2026-04-21T08:10:00",
+    "app_name": "VS Code",
+    "window_title": "services/paymentService.ts",
+    "chars": "const stripe = new Stripe(process.env.STRIPE_KEY)",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "services/paymentService.ts"
+  },
+  {
+    "timestamp": "2026-04-21T08:30:00",
+    "app_name": "VS Code",
+    "window_title": "types/payment.ts",
+    "chars": "// Type definitions for payment module",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "types/payment.ts"
+  },
+  {
+    "timestamp": "2026-04-21T09:00:00",
+    "app_name": "VS Code",
+    "window_title": "services/paymentService.ts",
+    "chars": "try { session = await stripe.checkout.sessions.create({",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "services/paymentService.ts"
+  },
+  {
+    "timestamp": "2026-04-21T09:30:00",
+    "app_name": "Terminal",
+    "window_title": "~",
+    "chars": "npm install @stripe/stripe-js && npm install -D @types/stripe",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "~"
+  },
+  {
+    "timestamp": "2026-04-21T10:30:00",
+    "app_name": "VS Code",
+    "window_title": "services/paymentService.ts",
+    "chars": "// BUG: race condition when two payments created simultaneously",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "services/paymentService.ts"
+  },
+  {
+    "timestamp": "2026-04-21T10:35:00",
+    "app_name": "VS Code",
+    "window_title": "services/paymentService.ts",
+    "chars": "// Fixed: added mutex lock using Redis SETNX",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "services/paymentService.ts"
+  },
+  {
+    "timestamp": "2026-04-21T10:50:00",
+    "app_name": "VS Code",
+    "window_title": "services/paymentService.ts",
+    "chars": "const lockKey = `payment:${orderId}:lock`",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "services/paymentService.ts"
+  },
+  {
+    "timestamp": "2026-04-21T11:00:00",
+    "app_name": "Chrome",
+    "window_title": "stripe.com/docs",
+    "chars": "Reading Stripe webhooks documentation",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "stripe.com/docs"
+  },
+  {
+    "timestamp": "2026-04-21T11:20:00",
+    "app_name": "VS Code",
+    "window_title": "services/paymentService.ts",
+    "chars": "await redis.set(lockKey, '1', 'NX', 'EX', 30)",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "services/paymentService.ts"
+  },
+  {
+    "timestamp": "2026-04-21T12:00:00",
+    "app_name": "VS Code",
+    "window_title": "services/paymentService.ts",
+    "chars": "// Webhook handler: handleCheckoutComplete()",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "services/paymentService.ts"
+  },
+  {
+    "timestamp": "2026-04-21T12:30:00",
+    "app_name": "VS Code",
+    "window_title": "services/paymentService.ts",
+    "chars": "export async function handleWebhook(event: Stripe.Event) {",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "services/paymentService.ts"
+  },
+  {
+    "timestamp": "2026-04-21T13:30:00",
+    "app_name": "Terminal",
+    "window_title": "~",
+    "chars": "npm test -- paymentService  # Run tests",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "~"
+  },
+  {
+    "timestamp": "2026-04-21T13:35:00",
+    "app_name": "VS Code",
+    "window_title": "services/paymentService.ts",
+    "chars": "// Test coverage: 94%, missing webhook edge case",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "services/paymentService.ts"
+  },
+  {
+    "timestamp": "2026-04-21T13:50:00",
+    "app_name": "VS Code",
+    "window_title": "services/paymentService.ts",
+    "chars": "// Added test for duplicate webhook delivery",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "services/paymentService.ts"
+  },
+  {
+    "timestamp": "2026-04-21T14:10:00",
+    "app_name": "Terminal",
+    "window_title": "~",
+    "chars": "curl -X POST http://localhost:3000/api/webhooks/stripe -d '{}'",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "~"
+  },
+  {
+    "timestamp": "2026-04-21T15:30:00",
+    "app_name": "VS Code",
+    "window_title": "services/paymentService.ts",
+    "chars": "// Final polish: add error handling and logging",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "services/paymentService.ts"
+  },
+  {
+    "timestamp": "2026-04-21T15:45:00",
+    "app_name": "VS Code",
+    "window_title": "PR #445",
+    "chars": "git add -A && git commit -m 'feat: payment service with Stripe checkout'",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "PR #445"
+  },
+  {
+    "timestamp": "2026-04-21T16:00:00",
+    "app_name": "Chrome",
+    "window_title": "github.com/PR/445",
+    "chars": "Opening PR for payment service",
+    "source": "test",
+    "focus_active": true,
+    "window_id": "github.com/PR/445"
+  }
+]
