@@ -26,12 +26,14 @@ Output format (compatible with IterativeReasoner):
 import json
 import os
 import requests
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 
 from burst import Burst
+from external_context import format_external_context_for_prompt
 
 
 # ----------------------------------------------------------------------------- 
@@ -56,7 +58,8 @@ def load_api_key() -> str:
 
 def make_api_call(prompt: str, api_key: str, model: str = "MiniMax-M2",
                   base_url: str = "https://api.minimax.io",
-                  temperature: float = 0.3, max_tokens: int = 8000) -> tuple:
+                  temperature: float = 0.3, max_tokens: int = 8000,
+                  retries: int = 3) -> tuple:
     """Returns (response_text, tokens_used)"""
     if not api_key:
         return "", 0
@@ -72,23 +75,33 @@ def make_api_call(prompt: str, api_key: str, model: str = "MiniMax-M2",
         "max_tokens": max_tokens,
         "extra_body": {"thinking": {"type": "off"}},
     }
-    
-    try:
-        response = requests.post(
-            f"{base_url}/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=120,
-        )
-        data = response.json()
-        if "choices" in data and data["choices"]:
-            content = data["choices"][0]["message"]["content"]
-            tokens = len(prompt) // 4 + len(content) // 4
-            return content, tokens
-        elif "base_resp" in data:
-            return f"API Error: {data['base_resp'].get('status_msg', 'unknown')}", 0
-    except Exception as e:
-        return f"Error: {str(e)}", 0
+
+    for attempt in range(retries):
+        try:
+            response = requests.post(
+                f"{base_url}/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=120,
+            )
+            data = response.json()
+            if "choices" in data and data["choices"]:
+                content = data["choices"][0]["message"]["content"]
+                tokens = len(prompt) // 4 + len(content) // 4
+                return content, tokens
+            if "base_resp" in data:
+                status_msg = data["base_resp"].get("status_msg", "unknown")
+                if "rate" in status_msg.lower() or "limit" in status_msg.lower():
+                    import time
+                    time.sleep(2 ** attempt)
+                    continue
+                return f"API Error: {status_msg}", 0
+        except Exception as e:
+            if attempt < retries - 1:
+                import time
+                time.sleep(2 ** attempt)
+                continue
+            return f"Error: {str(e)}", 0
     return "", 0
 
 
@@ -129,6 +142,70 @@ def extract_json(text: str) -> Optional[str]:
     return None
 
 
+def repair_json(malformed_json: str) -> Optional[str]:
+    """Trim malformed JSON back to the last parseable top-level prefix."""
+    if not malformed_json:
+        return None
+
+    depth = 0
+    in_string = False
+    escape_next = False
+
+    for i in range(len(malformed_json) - 1, -1, -1):
+        c = malformed_json[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if c == '\\' and in_string:
+            escape_next = True
+            continue
+        if c == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if c in '}]':
+            depth += 1
+        elif c in '{[':
+            depth -= 1
+        if depth == 0 and c in '}]':
+            candidate = malformed_json[:i+1]
+            try:
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                pass
+
+    last_brace = malformed_json.rfind('}')
+    if last_brace > 0:
+        candidate = malformed_json[:last_brace+1]
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
+def extract_json_for_key(text: str, expected_key: str) -> Optional[str]:
+    """Prefer a top-level object containing expected_key, then fall back generically."""
+    if expected_key:
+        key_pattern = f'"{expected_key}"'
+        key_pos = text.find(key_pattern)
+        if key_pos != -1:
+            start = text.rfind("{", 0, key_pos)
+            if start != -1:
+                depth = 0
+                for i in range(start, len(text)):
+                    if text[i] == '{':
+                        depth += 1
+                    elif text[i] == '}':
+                        depth -= 1
+                        if depth == 0:
+                            return text[start:i+1]
+    return extract_json(text)
+
+
 # ----------------------------------------------------------------------------- 
 # Agentic Reasoner
 # ----------------------------------------------------------------------------- 
@@ -165,6 +242,7 @@ class AgenticReasoner:
         self._sorted_bursts: List[Burst] = []
         self._gap_analysis: Dict[str, Any] = {}
         self._session_hypotheses: List[Dict] = []
+        self._external_context: Dict[str, Any] = {}
     
     # -------------------------------------------------------------------------
     # Tools (implemented as methods the agent calls via LLM prompts)
@@ -271,7 +349,7 @@ class AgenticReasoner:
     # Main entry point
     # -------------------------------------------------------------------------
     
-    def reason_day(self, bursts: List[Burst]) -> Dict[str, Any]:
+    def reason_day(self, bursts: List[Burst], external_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Full agentic reasoning pipeline."""
         if not bursts:
             return self._empty_result()
@@ -285,6 +363,7 @@ class AgenticReasoner:
         self._survey_tokens = 0
         self._deliberation_tokens = 0
         self._session_hypotheses = []
+        self._external_context = external_context or {}
         
         # --- PASS 1: SURVEY ---
         survey_result = self._survey_pass()
@@ -302,6 +381,7 @@ class AgenticReasoner:
         final_result["deliberation_tokens"] = self._deliberation_tokens
         final_result["total_tokens"] = self._survey_tokens + self._deliberation_tokens
         final_result["num_tool_calls"] = self._tool_calls
+        final_result["external_context"] = self._external_context
         
         return final_result
     
@@ -319,6 +399,7 @@ class AgenticReasoner:
             "deliberation_tokens": 0,
             "total_tokens": 0,
             "num_tool_calls": 0,
+            "external_context": {},
         }
     
     # -------------------------------------------------------------------------
@@ -365,7 +446,7 @@ class AgenticReasoner:
         for i, b in enumerate(self._sorted_bursts):
             ts = b.timestamp[11:16]
             window = b.window_title.split(' - ')[-1] if ' - ' in b.window_title else b.window_title
-            preview = b.chars[:40].replace("\n", " ").replace('"', "'")
+            preview = b.chars[:80].replace("\n", " ").replace('"', "'")
             
             # Check for large gap before this burst
             gap_note = ""
@@ -392,6 +473,7 @@ class AgenticReasoner:
             "large_gaps": [(i, g, t) for i, g, t in gaps if g >= self.GAP_THRESHOLD_MINUTES],
             "all_gaps_5min_plus": [(i, g, t) for i, g, t in gaps],
             "annotated_bursts": annotated,
+            "external_context": self._external_context,
         }
         
         # Write survey to scratchpad
@@ -401,6 +483,11 @@ class AgenticReasoner:
             f"apps={app_counts}, large_gaps={len(self._gap_analysis['large_gaps'])}"
         )
         self.scratchpad_write(survey_summary)
+        if self._external_context:
+            self.scratchpad_write(
+                "EXTERNAL: supplemental same-day context loaded from "
+                f"GitHub/Hermes for {self._external_context.get('date', 'unknown date')}"
+            )
         
         return overview
     
@@ -608,6 +695,139 @@ Every burst 0 to {survey['num_bursts']-1} must appear in exactly one hypothesis.
             "grouping_reasoning": reasoning,
             "confidence": "high" if len(burst_ids) >= 2 else "medium",
         }
+
+    def _hypothesis_pass(self, survey: Dict[str, Any]) -> List[Dict]:
+        """Form semantic session hypotheses using the full burst list."""
+        if not self.api_key:
+            raise RuntimeError("AgenticReasoner requires MINIMAX_API_KEY; heuristic mode is disabled.")
+
+        gap_lines = [
+            f"  burst[{i}] at {ts}: {gap_min}min gap"
+            for i, gap_min, ts in survey["all_gaps_5min_plus"][:30]
+        ]
+        burst_lines = ["  " + line for line in survey["annotated_bursts"]]
+
+        prompt = f"""You are sessionizing a developer's keystroke bursts into SEMANTIC WORK SESSIONS.
+
+The goal is not app-by-app segmentation. The goal is to identify the underlying task, project, bug, deliverable, or conversation thread.
+
+CRITICAL RULES:
+1. 30+ MINUTE GAP = HARD SPLIT. Nothing survives a 30+ minute gap.
+2. SAME UNDERLYING TASK across app switches = SAME SESSION.
+3. A session MAY contain NON-CONSECUTIVE burst_ids if the user briefly detours and then returns to the same work.
+4. Sessions are WORK-BASED, not TIME-BASED. Multiple sessions may overlap in clock time if the user is multitasking and bouncing between them.
+5. Browser research + ChatGPT prompting + screenshots + Save As dialogs for the same artifact/design = ONE session.
+6. Discord + terminal + browser + agent chat while investigating one issue = ONE session.
+7. Unrelated browsing, watching YouTube, casual exploration, or reading updates should be a SEPARATE session even if it happens during the same time span as technical work.
+8. Do not merge an incidental-but-different thread just because it is nearby in time. Keep "Hermes reset / infra debugging" separate from "casual browsing / YouTube watching" unless the browsing was directly supporting that debugging task.
+9. Screenshotting, saving files, and quick file management usually belong to the surrounding task that produced those artifacts.
+10. Meetings/calls are their own sessions. Code review reading is separate from implementation work.
+11. Different logical tasks in the same app must split.
+12. Prefer semantic workstream grouping over window boundaries.
+
+Negative examples:
+- Terminal gateway debugging + a separate "codex update" search = TWO sessions unless the update search was clearly part of the gateway fix.
+- Infrastructure debugging + watching a YouTube video in a browser tab = TWO sessions unless the video was directly used as a reference for the debugging.
+- Discord coordination about frontend automation + separate agent/infrastructure debugging = TWO sessions even if both happen in the same few minutes.
+- "web", "codex update", general browsing, Gmail, or YouTube should not be folded into a bugfix session unless the burst text or window title clearly shows they were used to solve that bug.
+
+SURVEY DATA:
+- Total bursts: {survey['num_bursts']}
+- Time range: {survey['time_range']}
+- App distribution: {survey['app_counts']}
+- Total chars: {survey['total_chars']}
+- Sources: {survey['sources']}
+
+EXTERNAL SAME-DAY CONTEXT:
+{format_external_context_for_prompt(survey.get("external_context"))}
+
+GAPS (5+ minutes):
+{chr(10).join(gap_lines) if gap_lines else "(no significant gaps)"}
+
+ALL BURSTS:
+{chr(10).join(burst_lines)}
+
+Return hypotheses that cover every burst id exactly once.
+
+Important:
+- start_time/end_time are just the outer clock bounds of that workstream and MAY overlap with other sessions.
+- It is completely valid for two sessions to interleave in time.
+- Optimize for "what distinct threads of work were active?" not "what contiguous block of minutes happened?"
+
+Each hypothesis must include:
+- session_id
+- burst_ids
+- start_time
+- end_time
+- topic: short semantic task name
+- supporting_apps: list of apps materially involved
+- grouping_reasoning: 1 sentence explaining the common underlying work
+- confidence: high/medium/low
+
+Example topics:
+- "Inspire 5 patent poster design"
+- "Hermes agent Docker gateway debugging"
+
+Respond ONLY with JSON in this exact shape:
+{{"hypotheses": [
+  {{
+    "session_id": 1,
+    "burst_ids": [0, 1, 2],
+    "start_time": "09:39",
+    "end_time": "10:10",
+    "topic": "Inspire 5 patent poster design",
+    "supporting_apps": ["comet", "ChatGPT", "SnippingTool", "PickerHost"],
+    "grouping_reasoning": "Research, prompt iteration, screenshots, and saved artifacts all supported the same patent poster design work.",
+    "confidence": "high"
+  }}
+]}}"""
+
+        response, tokens = make_api_call(
+            prompt,
+            self.api_key,
+            self.model,
+            self.base_url,
+            temperature=0.2,
+            max_tokens=8000,
+        )
+        self._survey_tokens += tokens
+        self._deliberation_tokens += tokens
+
+        json_str = extract_json_for_key(response, "hypotheses")
+        if not json_str:
+            repair_prompt = f"""{prompt}
+
+Your previous response did not contain parseable JSON.
+Return the same answer again, but this time respond with JSON only in the exact required shape and no extra text."""
+            response, retry_tokens = make_api_call(
+                repair_prompt,
+                self.api_key,
+                self.model,
+                self.base_url,
+                temperature=0.0,
+                max_tokens=8000,
+            )
+            self._survey_tokens += retry_tokens
+            self._deliberation_tokens += retry_tokens
+            json_str = extract_json_for_key(response, "hypotheses")
+            if not json_str:
+                raise RuntimeError(f"Hypothesis pass returned no parseable JSON. Response preview: {response[:600]}")
+
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError:
+            repaired = repair_json(json_str)
+            if not repaired:
+                raise RuntimeError(f"Hypothesis JSON was malformed and unrecoverable. Response preview: {response[:600]}")
+            data = json.loads(repaired)
+
+        hypotheses = data.get("hypotheses")
+        if not isinstance(hypotheses, list) or not hypotheses:
+            raise RuntimeError(f"Hypothesis pass returned invalid hypotheses payload: {str(data)[:600]}")
+
+        self._session_hypotheses = hypotheses
+        self.scratchpad_write(f"HYPOTHESIS: {len(self._session_hypotheses)} semantic sessions proposed")
+        return self._session_hypotheses
     
     # -------------------------------------------------------------------------
     # PASS 3: VERIFICATION
@@ -665,9 +885,14 @@ Every burst 0 to {survey['num_bursts']-1} must appear in exactly one hypothesis.
     def _commit_pass(self, hypotheses: List[Dict]) -> Dict[str, Any]:
         """Commit final sessions, produce summary reasoning."""
         
-        # Final consolidation: merge single-burst low-confidence sessions 
+        # Final consolidation: merge single-burst low-confidence sessions
         # with neighbors if gap is small
         final_sessions = self._consolidate_sessions(hypotheses)
+        if self.api_key and final_sessions:
+            try:
+                final_sessions = self._refine_session_outliers(final_sessions)
+            except Exception as e:
+                self.scratchpad_write(f"REFINE WARNING: {str(e)}")
         
         # Build output — enrich with app_name, window_title from bursts
         sessions_output = []
@@ -688,17 +913,24 @@ Every burst 0 to {survey['num_bursts']-1} must appear in exactly one hypothesis.
                 "burst_ids": burst_ids,
                 "start_time": h.get("start_time", "00:00"),
                 "end_time": h.get("end_time", "00:00"),
+                "topic": h.get("topic", ""),
+                "supporting_apps": h.get("supporting_apps", []),
                 "app_name": h.get("app_name") or dominant_app,
                 "window_title": h.get("window_title") or dominant_window,
                 "grouping_reasoning": h.get("grouping_reasoning", ""),
                 "confidence": h.get("confidence", "medium"),
             })
+
+        if self.api_key and sessions_output:
+            sessions_output = self._enrich_sessions(sessions_output)
+
+        sessions_output = self._link_related_sessions(sessions_output)
         
         # Generate daily summary if we have API key
         daily_summary = ""
         daily_narrative = ""
-        if self.api_key and final_sessions:
-            daily_summary, daily_narrative = self._generate_summary(final_sessions)
+        if self.api_key and sessions_output:
+            daily_summary, daily_narrative = self._generate_summary(sessions_output)
         
         self.scratchpad_write(f"COMMIT: {len(final_sessions)} final sessions")
         
@@ -710,7 +942,7 @@ Every burst 0 to {survey['num_bursts']-1} must appear in exactly one hypothesis.
             "pass1_tokens_used": self._survey_tokens,
             "pass2_tokens_used": 0,
             "pass3_tokens_used": 0,
-            "total_api_calls": 1,  # survey + hypothesis in ~1 call
+            "total_api_calls": 3,
         }
     
     def _consolidate_sessions(self, hypotheses: List[Dict]) -> List[Dict]:
@@ -791,6 +1023,305 @@ Every burst 0 to {survey['num_bursts']-1} must appear in exactly one hypothesis.
             h["session_id"] = idx + 1
         
         return consolidated
+
+    def _enrich_sessions(self, sessions: List[Dict]) -> List[Dict]:
+        """Extract concrete session details from burst text and window context."""
+        if not sessions:
+            return sessions
+
+        blocks = []
+        for session in sessions:
+            burst_ids = session.get("burst_ids", [])
+            lines = []
+            window_titles = []
+            for bid in burst_ids[:40]:
+                if 0 <= bid < len(self._sorted_bursts):
+                    b = self._sorted_bursts[bid]
+                    window_titles.append(b.window_title)
+                    preview = b.chars[:180].replace("\n", " ")
+                    lines.append(
+                        f"[{bid}] {b.timestamp[11:16]} | {b.app_name} | {b.window_title[:80]} | {preview}"
+                    )
+
+            blocks.append({
+                "session_id": session.get("session_id", 0),
+                "topic": session.get("topic", ""),
+                "time": f"{session.get('start_time', '?')}-{session.get('end_time', '?')}",
+                "supporting_apps": session.get("supporting_apps", []),
+                "window_titles": window_titles[:20],
+                "bursts": lines,
+            })
+
+        prompt = f"""You are enriching already-grouped developer work sessions.
+
+Your job is to write USEFUL session narratives for future retrieval and debugging, not generic summaries.
+
+For each session, return:
+- session_id
+- narrative
+
+The narrative should usually be one dense paragraph, and may be two paragraphs if the session has a lot of important detail.
+It should be useful later for answering questions like:
+- how was a bug fixed or investigated?
+- what type of work happened?
+- what important details or findings came up?
+- what did we try?
+- what did we discard?
+- what references, searches, files, or tools mattered?
+
+Rules:
+- Be specific and evidence-based from the session data.
+- Do not just restate "the user worked on X".
+- Include concrete searches, prompts, source documents, files, saved outputs, failures, mismatches, revisions, and conclusions when present.
+- Mention design/style direction only when it materially mattered to the work.
+- Prefer concrete nouns and short factual clauses over vague abstractions.
+- Write for future querying and recall, not for elegance.
+
+SESSION DATA:
+{json.dumps(blocks, indent=2)}
+
+Respond ONLY with JSON:
+{{"sessions": [
+  {{
+    "session_id": 1,
+    "narrative": "..."
+  }}
+]}}"""
+
+        response, tokens = make_api_call(
+            prompt,
+            self.api_key,
+            self.model,
+            self.base_url,
+            temperature=0.2,
+            max_tokens=5000,
+        )
+        self._deliberation_tokens += tokens
+
+        json_str = extract_json_for_key(response, "sessions")
+        if not json_str:
+            raise RuntimeError(f"Session enrichment returned no parseable JSON. Response preview: {response[:600]}")
+
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError:
+            repaired = repair_json(json_str)
+            if not repaired:
+                raise RuntimeError(f"Session enrichment JSON was malformed and unrecoverable. Response preview: {response[:600]}")
+            data = json.loads(repaired)
+
+        enriched = data.get("sessions")
+        if not isinstance(enriched, list):
+            raise RuntimeError(f"Session enrichment returned invalid payload: {str(data)[:600]}")
+
+        by_id = {item.get("session_id"): item for item in enriched if isinstance(item, dict)}
+        merged = []
+        for session in sessions:
+            details = by_id.get(session.get("session_id"), {})
+            merged.append({
+                **session,
+                "narrative": details.get("narrative", ""),
+            })
+
+        self.scratchpad_write(f"ENRICH: extracted details for {len(merged)} sessions")
+        return merged
+
+    def _link_related_sessions(self, sessions: List[Dict]) -> List[Dict]:
+        """Add explicit links between sessions that appear to continue the same work."""
+        if not sessions:
+            return sessions
+
+        def normalize_topic(topic: str) -> set[str]:
+            words = re.findall(r"[a-z0-9]+", (topic or "").lower())
+            stop = {
+                "and", "the", "for", "with", "from", "into", "that", "this", "work",
+                "design", "creation", "research", "refinement", "debugging", "session",
+                "casual", "activity", "discussion", "coordination", "discord", "codex",
+                "comet", "chatgpt", "vision", "frontend",
+            }
+            return {w for w in words if w not in stop and len(w) > 2}
+
+        def parse_minutes(ts: str) -> int:
+            try:
+                hh, mm = ts.split(":")
+                return int(hh) * 60 + int(mm)
+            except Exception:
+                return -10**9
+
+        linked = []
+        prior = []
+        for session in sessions:
+            topic_terms = normalize_topic(session.get("topic", ""))
+            app_set = set(session.get("supporting_apps", []))
+            related = []
+            for prev in prior:
+                prev_terms = normalize_topic(prev.get("topic", ""))
+                if not topic_terms or not prev_terms:
+                    continue
+                overlap = len(topic_terms & prev_terms)
+                shared_apps = len(app_set & set(prev.get("supporting_apps", [])))
+                gap_minutes = parse_minutes(session.get("start_time", "00:00")) - parse_minutes(prev.get("end_time", "00:00"))
+                if overlap >= 2:
+                    related.append({
+                        "session_id": prev.get("session_id"),
+                        "relation": "continues_same_topic",
+                        "gap_minutes": max(0, gap_minutes),
+                        "topic": prev.get("topic", ""),
+                    })
+
+            session_copy = dict(session)
+            session_copy["related_sessions"] = related
+            linked.append(session_copy)
+            prior.append(session_copy)
+
+        if any(s.get("related_sessions") for s in linked):
+            self.scratchpad_write(
+                f"LINK: added related-session links for {sum(1 for s in linked if s.get('related_sessions'))} sessions"
+            )
+        return linked
+
+    def _refine_session_outliers(self, sessions: List[Dict]) -> List[Dict]:
+        """Ask the model to make only surgical fixes for obvious outlier bursts."""
+        if not sessions:
+            return sessions
+
+        session_blocks = []
+        for session in sessions:
+            burst_lines = []
+            for bid in session.get("burst_ids", []):
+                if 0 <= bid < len(self._sorted_bursts):
+                    b = self._sorted_bursts[bid]
+                    preview = b.chars[:140].replace("\n", " ")
+                    burst_lines.append(
+                        f"[{bid}] {b.timestamp[11:16]} | {b.app_name} | {b.window_title[:70]} | {preview}"
+                    )
+            session_blocks.append({
+                "session_id": session.get("session_id", 0),
+                "topic": session.get("topic", ""),
+                "start_time": session.get("start_time", ""),
+                "end_time": session.get("end_time", ""),
+                "supporting_apps": session.get("supporting_apps", []),
+                "grouping_reasoning": session.get("grouping_reasoning", ""),
+                "bursts": burst_lines,
+            })
+
+        prompt = f"""You are doing a SURGICAL outlier-refinement pass on already-grouped work sessions.
+
+Goal:
+- Keep the existing sessions unless there is a clear mismatch.
+- Fix only obvious outliers: bursts that clearly belong in a different session or should be split into a small separate session.
+
+Important rules:
+- Do NOT redo sessionization from scratch.
+- Preserve the current topics whenever possible.
+- A session is work-based, not time-based, and resumed work may stay in the same session.
+- But bursts from unrelated Discord chatter, YouTube watching, casual browsing, or random searches should be removed from a technical/design session if they are clearly not supporting that session.
+- Browser research that directly supports a design/debugging session should stay in that session.
+- Lock screen unlocks, startup search box activity, accidental keystrokes, task switching noise, and unrelated Discord messages should NOT stay inside a focused design/debugging session.
+- If a burst is weakly related or ambiguous, prefer putting it in a small incidental/noise/coordination session rather than polluting the main work session.
+- Discord belongs in a design/debugging session only when the message content clearly supports that same work thread.
+- SearchHost or explorer belongs in a work session only when it is clearly part of that work, not generic startup/task switching behavior.
+- Return every burst exactly once across all refined sessions.
+- Only make changes when the mismatch is clear from app, window title, and text.
+
+Negative examples:
+- LockApp + search box query "chat" should not be part of an Inspire patent-design session.
+- Discord chatter in the middle of patent-image work should be split out unless it clearly discusses that same patent-image task.
+- Random system/input noise should not remain inside a focused research or design session.
+
+Current sessions:
+{json.dumps(session_blocks, indent=2)}
+
+Respond ONLY with JSON in this exact shape:
+{{"sessions": [
+  {{
+    "session_id": 1,
+    "topic": "existing or slightly improved topic",
+    "burst_ids": [0, 1, 2],
+    "start_time": "09:39",
+    "end_time": "10:10",
+    "supporting_apps": ["comet", "ChatGPT"],
+    "grouping_reasoning": "short reason"
+  }}
+]}}"""
+
+        all_original = sorted(bid for s in sessions for bid in s.get("burst_ids", []))
+
+        def parse_refinement_response(raw_response: str) -> List[Dict]:
+            json_str = extract_json_for_key(raw_response, "sessions")
+            if not json_str:
+                raise RuntimeError(f"Outlier refinement returned no parseable JSON. Response preview: {raw_response[:600]}")
+            try:
+                data = json.loads(json_str)
+            except json.JSONDecodeError:
+                repaired = repair_json(json_str)
+                if not repaired:
+                    raise RuntimeError(f"Outlier refinement JSON was malformed and unrecoverable. Response preview: {raw_response[:600]}")
+                data = json.loads(repaired)
+            refined_local = data.get("sessions")
+            if not isinstance(refined_local, list) or not refined_local:
+                raise RuntimeError(f"Outlier refinement returned invalid payload: {str(data)[:600]}")
+            return refined_local
+
+        def coverage_error(refined_local: List[Dict]) -> Optional[str]:
+            refined_ids = [bid for s in refined_local for bid in s.get("burst_ids", [])]
+            all_refined = sorted(refined_ids)
+            if all_original == all_refined:
+                return None
+            original_set = set(all_original)
+            refined_set = set(all_refined)
+            missing = sorted(original_set - refined_set)
+            extras = sorted(refined_set - original_set)
+            duplicates = sorted(bid for bid in set(refined_ids) if refined_ids.count(bid) > 1)
+            return (
+                "Coverage mismatch. "
+                f"Missing burst_ids: {missing}. "
+                f"Duplicate burst_ids: {duplicates}. "
+                f"Extra/invalid burst_ids: {extras}. "
+                "Return corrected sessions with every original burst id exactly once."
+            )
+
+        response, tokens = make_api_call(
+            prompt,
+            self.api_key,
+            self.model,
+            self.base_url,
+            temperature=0.1,
+            max_tokens=6000,
+        )
+        self._deliberation_tokens += tokens
+        refined = parse_refinement_response(response)
+
+        error = coverage_error(refined)
+        attempts = 0
+        while error and attempts < 2:
+            repair_prompt = f"""{prompt}
+
+Your previous refinement response was structurally invalid.
+{error}
+
+Do not explain. Return corrected JSON only, preserving the same intent but fixing burst coverage exactly."""
+            response, tokens = make_api_call(
+                repair_prompt,
+                self.api_key,
+                self.model,
+                self.base_url,
+                temperature=0.0,
+                max_tokens=6000,
+            )
+            self._deliberation_tokens += tokens
+            refined = parse_refinement_response(response)
+            error = coverage_error(refined)
+            attempts += 1
+
+        if error:
+            raise RuntimeError(f"Outlier refinement could not repair coverage after retry loop. {error}")
+
+        for idx, s in enumerate(refined):
+            s["session_id"] = idx + 1
+
+        self.scratchpad_write(f"REFINE: adjusted sessions with surgical outlier pass ({len(refined)} sessions)")
+        return refined
     
     def _generate_summary(self, sessions: List[Dict]) -> tuple:
         """Generate daily summary using LLM."""
@@ -805,39 +1336,68 @@ Every burst 0 to {survey['num_bursts']-1} must appear in exactly one hypothesis.
             session_summaries.append({
                 "id": s.get("session_id", 0),
                 "time": f"{s.get('start_time', '?')}-{s.get('end_time', '?')}",
+                "topic": s.get("topic", ""),
                 "app": s.get("app_name", "Unknown"),
                 "bursts": len(burst_ids),
                 "chars": chars,
+                "narrative": s.get("narrative", ""),
                 "reasoning": s.get("grouping_reasoning", ""),
                 "confidence": s.get("confidence", "medium"),
             })
         
-        prompt = f"""Summarize this developer's work day from keystroke sessions.
+        prompt = f"""Write a daily recall note from these keystroke-derived work sessions.
+
+This note is for future use by the same person doing the work, or by a future agent helping that same person.
+Do NOT write like an outside observer describing "the developer."
+Do NOT evaluate productivity or "day quality."
 
 {len(sessions)} sessions detected:
 {json.dumps(session_summaries, indent=2)}
 
-Write a 2-paragraph daily summary. Focus on:
-- Major topics/projects worked on
-- Patterns of task switching, debugging, writing
-- Overall day quality (focused, scattered, productive, etc.)
+EXTERNAL SAME-DAY CONTEXT:
+{format_external_context_for_prompt(self._external_context)}
+
+Write:
+- `daily_summary`: one dense paragraph that helps future recall of what actually happened, what mattered, what was tried, what was learned, and what changed
+- `patterns`: one dense paragraph covering cross-session context that will help later, such as interruptions, resumed threads, unresolved issues, discarded approaches, repeated bugs, decisions made, or things to revisit
+
+Style rules:
+- Prefer direct factual phrasing over narration about a person
+- Avoid phrases like "the developer did..." or "the session reveals..."
+- Include specific tools, bugs, files, searches, commands, GitHub activity, Hermes agent activity, and decisions when useful
+- Optimize for future querying and handoff, not elegance
 
 Respond with JSON: {{"daily_summary": "...", "patterns": "..."}}
 Respond ONLY with JSON."""
         
-        response, tokens = make_api_call(prompt, self.api_key, self.model, self.base_url, temperature=0.3, max_tokens=600)
+        response, tokens = make_api_call(prompt, self.api_key, self.model, self.base_url, temperature=0.3, max_tokens=1000)
         self._deliberation_tokens += tokens
         
-        json_str = extract_json(response)
+        json_str = extract_json_for_key(response, "daily_summary")
         if json_str:
             try:
                 data = json.loads(json_str)
-                return (
-                    data.get("daily_summary", ""),
-                    data.get("patterns", ""),
-                )
+                if isinstance(data, list) and data:
+                    data = data[0]
+                if isinstance(data, dict):
+                    return (
+                        data.get("daily_summary", ""),
+                        data.get("patterns", ""),
+                    )
             except json.JSONDecodeError:
-                pass
+                repaired = repair_json(json_str)
+                if repaired:
+                    try:
+                        data = json.loads(repaired)
+                        if isinstance(data, list) and data:
+                            data = data[0]
+                        if isinstance(data, dict):
+                            return (
+                                data.get("daily_summary", ""),
+                                data.get("patterns", ""),
+                            )
+                    except json.JSONDecodeError:
+                        pass
         
         return f"{len(sessions)} sessions detected.", ""
 
@@ -864,10 +1424,14 @@ class AgenticSession:
     confidence: str = "medium"
 
 
-def reason_day(bursts: List[Burst], api_key: str = None) -> Dict[str, Any]:
+def reason_day(
+    bursts: List[Burst],
+    api_key: str = None,
+    external_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Convenience function matching IterativeReasoner.reason_day interface."""
     reasoner = AgenticReasoner(api_key=api_key)
-    result = reasoner.reason_day(bursts)
+    result = reasoner.reason_day(bursts, external_context=external_context)
     
     # Convert to AgenticSession objects for compatibility
     sessions = []
